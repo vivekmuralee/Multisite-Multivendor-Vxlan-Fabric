@@ -1,0 +1,10 @@
+---
+device_role: border_leaf
+border_leaf: true
+
+# Uplink toward the external / WAN-MPLS edge router (e.g. the Cisco IOS
+# backbone referenced in the top-level README's Phase-2/Phase-3 work).
+# Numbered eBGP is used here since the far-end device is out of the fabric's
+# unnumbered underlay domain.
+external_bgp:
+  peer_asn: 65100

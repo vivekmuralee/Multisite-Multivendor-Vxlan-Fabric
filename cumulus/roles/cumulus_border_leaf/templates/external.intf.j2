@@ -1,0 +1,9 @@
+{{ ansible_managed | default('# This file is managed by Ansible - do not edit by hand') }}
+# {{ external_uplink.description }}
+# Bound into the tenant VRF so external routes exchange directly with the
+# VRF's EVPN/BGP instance (router bgp {{ router_asn }} vrf {{ l3vni.vrf }}).
+auto {{ external_uplink.interface }}
+iface {{ external_uplink.interface }}
+    address {{ external_uplink.local_ip }}
+    vrf {{ l3vni.vrf }}
+    mtu {{ fabric_mtu }}

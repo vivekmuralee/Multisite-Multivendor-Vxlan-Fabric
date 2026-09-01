@@ -1,0 +1,7 @@
+---
+- name: Push external (WAN/MPLS edge) uplink fragment
+  ansible.builtin.template:
+    src: external.intf.j2
+    dest: /etc/network/interfaces.d/30-external.intf
+    mode: "0644"
+  notify: reload networking

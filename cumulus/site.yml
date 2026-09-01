@@ -1,0 +1,26 @@
+---
+# Deploy a BGP EVPN VXLAN fabric across 2 spines and 6 leafs on Cumulus
+# Linux, with leaf05/leaf06 acting as external border leafs.
+#
+# Usage:
+#   ansible-playbook site.yml
+#   ansible-playbook site.yml --limit spine        # underlay only, spines
+#   ansible-playbook site.yml --limit border_leaf   # re-push external peering
+
+- name: Configure BGP underlay + EVPN control plane (all fabric switches)
+  hosts: fabric
+  gather_facts: false
+  roles:
+    - cumulus_underlay
+
+- name: Configure VXLAN overlay - bridge, VNIs, anycast gateways, VRF (leafs only)
+  hosts: leaf
+  gather_facts: false
+  roles:
+    - cumulus_overlay
+
+- name: Configure external WAN/MPLS-edge peering (border leafs only)
+  hosts: border_leaf
+  gather_facts: false
+  roles:
+    - cumulus_border_leaf

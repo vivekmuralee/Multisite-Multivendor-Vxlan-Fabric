@@ -1,0 +1,50 @@
+---
+- name: Ensure /etc/network/interfaces.d exists
+  ansible.builtin.file:
+    path: /etc/network/interfaces.d
+    state: directory
+    mode: "0755"
+
+- name: Ensure main interfaces file sources interfaces.d fragments
+  ansible.builtin.copy:
+    dest: /etc/network/interfaces
+    content: |
+      # This file is managed by Ansible (cumulus_underlay role) - do not edit by hand
+      # The lo stanza (with its address) lives in interfaces.d/00-loopback.intf
+      source /etc/network/interfaces.d/*.intf
+    mode: "0644"
+  notify: reload networking
+
+- name: Push loopback fragment
+  ansible.builtin.template:
+    src: loopback.intf.j2
+    dest: /etc/network/interfaces.d/00-loopback.intf
+    mode: "0644"
+  notify: reload networking
+
+- name: Push spine-to-leaf / leaf-to-spine uplink fragment
+  ansible.builtin.template:
+    src: uplinks.intf.j2
+    dest: /etc/network/interfaces.d/10-uplinks.intf
+    mode: "0644"
+  notify: reload networking
+
+- name: Push FRR underlay + EVPN overlay BGP configuration
+  ansible.builtin.template:
+    src: frr.conf.j2
+    dest: /etc/frr/frr.conf
+    owner: frr
+    group: frr
+    mode: "0640"
+    validate: /usr/lib/frr/frr-reload.py --test %s
+  notify: restart frr
+
+- name: Enable required FRR daemons (bgpd, zebra)
+  ansible.builtin.lineinfile:
+    path: /etc/frr/daemons
+    regexp: "^{{ item }}="
+    line: "{{ item }}=yes"
+  loop:
+    - bgpd
+    - zebra
+  notify: restart frr

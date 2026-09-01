@@ -1,0 +1,48 @@
+{{ ansible_managed | default('# This file is managed by Ansible - do not edit by hand') }}
+# VXLAN EVPN overlay: bridge, per-VLAN L2 VNIs, L3 VNI, distributed anycast
+# gateway SVIs, and the tenant VRF (symmetric IRB).
+
+auto bridge
+iface bridge
+    bridge-vlan-aware yes
+    bridge-ports {% for m in vni_mappings %}vni{{ m.vni }} {% endfor %}vni{{ l3vni.vni }}
+    bridge-vids {% for m in vni_mappings %}{{ m.vlan }} {% endfor %}{{ l3vni.vlan }}
+    bridge-pvid 1
+
+{% for m in vni_mappings %}
+auto vni{{ m.vni }}
+iface vni{{ m.vni }}
+    vxlan-id {{ m.vni }}
+    bridge-access {{ m.vlan }}
+    vxlan-local-tunnelip {{ vtep_ip }}
+    mtu {{ fabric_mtu }}
+
+{% endfor %}
+# L3 VNI - carries routed (symmetric IRB) traffic between tenant subnets
+auto vni{{ l3vni.vni }}
+iface vni{{ l3vni.vni }}
+    vxlan-id {{ l3vni.vni }}
+    bridge-access {{ l3vni.vlan }}
+    vxlan-local-tunnelip {{ vtep_ip }}
+    mtu {{ fabric_mtu }}
+
+{% for m in vni_mappings %}
+# {{ m.name }} - VLAN {{ m.vlan }} / VNI {{ m.vni }} - distributed anycast gateway
+auto vlan{{ m.vlan }}
+iface vlan{{ m.vlan }}
+    address-virtual {{ anycast_gw_mac }} {{ m.anycast_gw_ip }}
+    vlan-raw-device bridge
+    vlan-id {{ m.vlan }}
+    vrf {{ l3vni.vrf }}
+
+{% endfor %}
+# L3 VNI SVI - anchors the tenant VRF to vni{{ l3vni.vni }}
+auto vlan{{ l3vni.vlan }}
+iface vlan{{ l3vni.vlan }}
+    vlan-raw-device bridge
+    vlan-id {{ l3vni.vlan }}
+    vrf {{ l3vni.vrf }}
+
+auto {{ l3vni.vrf }}
+iface {{ l3vni.vrf }}
+    vrf-table auto

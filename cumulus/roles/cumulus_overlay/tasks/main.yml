@@ -1,0 +1,7 @@
+---
+- name: Push VXLAN bridge / VNI / SVI / VRF fragment
+  ansible.builtin.template:
+    src: vxlan.intf.j2
+    dest: /etc/network/interfaces.d/20-vxlan.intf
+    mode: "0644"
+  notify: reload networking

@@ -1,0 +1,19 @@
+{{ ansible_managed | default('# This file is managed by Ansible - do not edit by hand') }}
+# BGP-unnumbered fabric links (no IP addressing needed - eBGP peers over IPv6
+# link-local, RFC 5549). Cabling convention: leafNN's swp1 -> spine1 swpNN,
+# leafNN's swp2 -> spine2 swpNN (NN = the leaf's position in the leaf group).
+{% if 'spine' in group_names %}
+{% for leaf_host in groups['leaf'] | sort %}
+auto swp{{ loop.index }}
+iface swp{{ loop.index }} inet unnumbered lo
+    mtu {{ fabric_mtu }}
+    # peer: {{ leaf_host }}
+{% endfor %}
+{% elif 'leaf' in group_names %}
+{% for uplink in uplinks %}
+auto {{ uplink.interface }}
+iface {{ uplink.interface }} inet unnumbered lo
+    mtu {{ fabric_mtu }}
+    # peer: {{ uplink.peer }}
+{% endfor %}
+{% endif %}

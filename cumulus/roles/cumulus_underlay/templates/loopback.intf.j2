@@ -1,0 +1,5 @@
+{{ ansible_managed | default('# This file is managed by Ansible - do not edit by hand') }}
+# VTEP source / BGP router-id loopback
+auto lo
+iface lo inet static
+    address {{ loopback_ip }}

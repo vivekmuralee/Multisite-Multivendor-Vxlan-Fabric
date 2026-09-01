@@ -1,0 +1,4 @@
+---
+router_asn: 65011
+loopback_ip: 10.0.0.11/32
+vtep_ip: 10.0.0.11

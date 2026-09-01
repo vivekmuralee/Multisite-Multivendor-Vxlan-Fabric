@@ -1,0 +1,38 @@
+---
+# ---------------------------------------------------------------------------
+# Global fabric-wide variables
+# ---------------------------------------------------------------------------
+
+fabric_mtu: 9216
+
+# Tenant L2 VNIs stretched across every leaf. Every leaf configures the same
+# SVI / anycast gateway for each VLAN (symmetric IRB, distributed anycast GW).
+vni_mappings:
+  - vlan: 10
+    vni: 10010
+    name: WEB
+    subnet: 10.10.10.0/24
+    anycast_gw_ip: 10.10.10.1/24
+  - vlan: 20
+    vni: 10020
+    name: APP
+    subnet: 10.10.20.0/24
+    anycast_gw_ip: 10.10.20.1/24
+  - vlan: 30
+    vni: 10030
+    name: DB
+    subnet: 10.10.30.0/24
+    anycast_gw_ip: 10.10.30.1/24
+
+# L3 VNI used for symmetric IRB / inter-subnet routing within the tenant VRF.
+l3vni:
+  vlan: 100
+  vni: 10100
+  vrf: TENANT_A
+
+# Shared anycast gateway MAC used on every leaf for every tenant SVI.
+anycast_gw_mac: "44:38:39:ff:00:01"
+
+# EVPN / underlay behaviour
+evpn_advertise_all_vni: true
+bgp_ecmp: 2

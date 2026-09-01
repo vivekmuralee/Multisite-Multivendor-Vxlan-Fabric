@@ -1,0 +1,11 @@
+---
+router_asn: 65015
+loopback_ip: 10.0.0.15/32
+vtep_ip: 10.0.0.15
+
+# External uplink toward the WAN/MPLS edge router
+external_uplink:
+  interface: swp3
+  description: "Uplink to MPLS-PE / WAN Edge (border leaf 1)"
+  local_ip: 192.168.100.1/30
+  peer_ip: 192.168.100.2

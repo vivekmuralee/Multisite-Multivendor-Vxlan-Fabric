@@ -1,0 +1,9 @@
+---
+device_role: leaf
+
+# Every leaf uplinks to both spines. swpX naming and the spine-side ASN are
+# resolved via hostvars in the FRR/interfaces templates, so this list only
+# has to say which local ports go to which spine.
+uplinks:
+  - { interface: swp1, peer: spine1 }
+  - { interface: swp2, peer: spine2 }
