@@ -9,7 +9,8 @@ Platforms Listed below
 
 1.Cisco NXOS 9K  
 2.Arista EOS
-3.Sonic NOS
+3.Cumulus OS
+
 
 All the above mentioned platforms will have a datacenter fabric running Vxlan EVPN 
 
