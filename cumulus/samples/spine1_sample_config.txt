@@ -1,0 +1,101 @@
+===============================================================================
+Sample rendered configuration - SPINE1
+===============================================================================
+This is a plain-text example of what Ansible would render onto spine1 from
+the cumulus_underlay role's templates. It is for reference/reading only and
+is not consumed by any playbook.
+
+Role in fabric : spine (device_role: spine)
+Management IP  : 192.168.0.11
+Loopback IP    : 10.0.0.1/32
+Router ASN     : 65001
+Fabric MTU     : 9216
+Uplinks        : one unnumbered swp per leaf (6 leafs -> swp1-swp6)
+
+-------------------------------------------------------------------------------
+/etc/network/interfaces (loopback + fabric-facing ports)
+-------------------------------------------------------------------------------
+# This file is managed by Ansible - do not edit by hand
+
+# VTEP source / BGP router-id loopback
+auto lo
+iface lo inet static
+    address 10.0.0.1/32
+
+# BGP-unnumbered fabric links (no IP addressing needed - eBGP peers over IPv6
+# link-local, RFC 5549). Cabling convention: leafNN's swp1 -> spine1 swpNN,
+# leafNN's swp2 -> spine2 swpNN (NN = the leaf's position in the leaf group).
+auto swp1
+iface swp1 inet unnumbered lo
+    mtu 9216
+    # peer: leaf01
+
+auto swp2
+iface swp2 inet unnumbered lo
+    mtu 9216
+    # peer: leaf02
+
+auto swp3
+iface swp3 inet unnumbered lo
+    mtu 9216
+    # peer: leaf03
+
+auto swp4
+iface swp4 inet unnumbered lo
+    mtu 9216
+    # peer: leaf04
+
+auto swp5
+iface swp5 inet unnumbered lo
+    mtu 9216
+    # peer: leaf05
+
+auto swp6
+iface swp6 inet unnumbered lo
+    mtu 9216
+    # peer: leaf06
+
+-------------------------------------------------------------------------------
+/etc/frr/frr.conf (underlay BGP - no EVPN overlay on spines)
+-------------------------------------------------------------------------------
+! This file is managed by Ansible - do not edit by hand
+frr defaults datacenter
+hostname spine1
+log syslog informational
+service integrated-vtysh-config
+!
+router bgp 65001
+ bgp router-id 10.0.0.1
+ bgp bestpath as-path multipath-relax
+ no bgp default ipv4-unicast
+ neighbor UNDERLAY peer-group
+ neighbor UNDERLAY remote-as external
+ neighbor UNDERLAY capability extended-nexthop
+ neighbor UNDERLAY bfd
+ neighbor swp1 interface peer-group UNDERLAY
+ neighbor swp2 interface peer-group UNDERLAY
+ neighbor swp3 interface peer-group UNDERLAY
+ neighbor swp4 interface peer-group UNDERLAY
+ neighbor swp5 interface peer-group UNDERLAY
+ neighbor swp6 interface peer-group UNDERLAY
+ !
+ address-family ipv4 unicast
+  network 10.0.0.1/32
+  neighbor UNDERLAY activate
+  maximum-paths 2
+ exit-address-family
+ !
+ address-family l2vpn evpn
+  neighbor UNDERLAY activate
+  neighbor UNDERLAY next-hop-unchanged
+ exit-address-family
+!
+
+-------------------------------------------------------------------------------
+Notes
+-------------------------------------------------------------------------------
+- Spines only carry the underlay (IPv4 unicast + EVPN transit); they hold no
+  VNIs and no tenant VRFs, so there is no VXLAN/overlay section here.
+- "neighbor UNDERLAY next-hop-unchanged" lets EVPN routes pass through the
+  spine with the originating leaf's VTEP IP intact (route-reflector-less
+  EVPN, spine acts as a BGP transit only).
