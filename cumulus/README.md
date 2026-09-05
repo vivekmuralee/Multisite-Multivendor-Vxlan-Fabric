@@ -69,11 +69,16 @@ cumulus/
 ├── inventory/hosts.yml          # spine / leaf / border_leaf groups
 ├── group_vars/                  # fabric-wide + per-role defaults
 ├── host_vars/                   # per-device ASN, loopback, uplinks
+├── samples/                     # rendered example configs (leaf01, spine1) for reference only
 └── roles/
     ├── cumulus_underlay/        # /etc/network/interfaces.d fragments + frr.conf (all switches)
     ├── cumulus_overlay/         # VXLAN bridge, VNIs, SVIs, VRF (leafs only)
     └── cumulus_border_leaf/     # external uplink + eBGP peering (leaf05/leaf06 only)
 ```
+
+`samples/leaf01_sample_config.txt` and `samples/spine1_sample_config.txt` show what
+Ansible renders onto a leaf and a spine from the templates above - useful for
+reviewing the expected output without running the playbook against a live device.
 
 Config is pushed as `/etc/network/interfaces.d/*.intf` fragments
 (`00-loopback`, `10-uplinks`, `20-vxlan`, `30-external`) rather than one
@@ -89,8 +94,11 @@ ansible-playbook site.yml --limit leaf01  # single device
 ansible-playbook site.yml --check --diff  # dry run
 ```
 
-Update `inventory/hosts.yml` with real management IPs (or DNS names) for
-your GNS3/lab devices, and `remote_user`/SSH key in `ansible.cfg` as needed.
+`inventory/hosts.yml` already has the lab's GNS3 management IPs
+(192.168.122.32-39) for spine1/spine2/leaf01-03/leaf05-06 - `leaf04` is
+commented out until it's wired up. Update these (or swap in DNS names) if
+your GNS3 topology differs, and set `remote_user`/SSH key in `ansible.cfg`
+as needed.
 
 ## Before using this beyond a lab
 
