@@ -1,6 +1,6 @@
 ---
 # Deploy a BGP EVPN VXLAN fabric across 2 spines and 6 leafs on Cumulus
-# Linux, with leaf05/leaf06 acting as external border leafs.
+# Linux, with cl-lf-5/cl-lf-6 acting as external border leafs.
 #
 # Usage:
 #   ansible-playbook site.yml

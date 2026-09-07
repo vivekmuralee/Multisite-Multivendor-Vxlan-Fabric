@@ -1,4 +1,4 @@
-{{ ansible_managed | default('! This file is managed by Ansible - do not edit by hand') }}
+! This file is managed by Ansible - do not edit by hand
 frr defaults datacenter
 hostname {{ inventory_hostname }}
 log syslog informational
@@ -26,7 +26,7 @@ router bgp {{ router_asn }}
  !
  address-family l2vpn evpn
   neighbor UNDERLAY activate
-  neighbor UNDERLAY next-hop-unchanged
+  neighbor UNDERLAY attribute-unchanged next-hop
  exit-address-family
 !
 {% elif 'leaf' in group_names %}

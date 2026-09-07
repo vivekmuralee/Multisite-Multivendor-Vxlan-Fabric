@@ -5,5 +5,5 @@ device_role: leaf
 # resolved via hostvars in the FRR/interfaces templates, so this list only
 # has to say which local ports go to which spine.
 uplinks:
-  - { interface: swp1, peer: spine1 }
-  - { interface: swp2, peer: spine2 }
+  - { interface: swp1, peer: cl-sp-1 }
+  - { interface: swp2, peer: cl-sp-2 }

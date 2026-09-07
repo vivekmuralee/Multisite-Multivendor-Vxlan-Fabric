@@ -1,7 +1,7 @@
 ===============================================================================
 Sample rendered configuration - SPINE1
 ===============================================================================
-This is a plain-text example of what Ansible would render onto spine1 from
+This is a plain-text example of what Ansible would render onto cl-sp-1 from
 the cumulus_underlay role's templates. It is for reference/reading only and
 is not consumed by any playbook.
 
@@ -23,44 +23,44 @@ iface lo inet static
     address 10.0.0.1/32
 
 # BGP-unnumbered fabric links (no IP addressing needed - eBGP peers over IPv6
-# link-local, RFC 5549). Cabling convention: leafNN's swp1 -> spine1 swpNN,
-# leafNN's swp2 -> spine2 swpNN (NN = the leaf's position in the leaf group).
+# link-local, RFC 5549). Cabling convention: cl-lf-N's swp1 -> cl-sp-1 swpN,
+# cl-lf-N's swp2 -> cl-sp-2 swpN (N = the leaf's position in the leaf group).
 auto swp1
 iface swp1 inet unnumbered lo
     mtu 9216
-    # peer: leaf01
+    # peer: cl-lf-1
 
 auto swp2
 iface swp2 inet unnumbered lo
     mtu 9216
-    # peer: leaf02
+    # peer: cl-lf-2
 
 auto swp3
 iface swp3 inet unnumbered lo
     mtu 9216
-    # peer: leaf03
+    # peer: cl-lf-3
 
 auto swp4
 iface swp4 inet unnumbered lo
     mtu 9216
-    # peer: leaf04
+    # peer: cl-lf-4
 
 auto swp5
 iface swp5 inet unnumbered lo
     mtu 9216
-    # peer: leaf05
+    # peer: cl-lf-5
 
 auto swp6
 iface swp6 inet unnumbered lo
     mtu 9216
-    # peer: leaf06
+    # peer: cl-lf-6
 
 -------------------------------------------------------------------------------
 /etc/frr/frr.conf (underlay BGP - no EVPN overlay on spines)
 -------------------------------------------------------------------------------
 ! This file is managed by Ansible - do not edit by hand
 frr defaults datacenter
-hostname spine1
+hostname cl-sp-1
 log syslog informational
 service integrated-vtysh-config
 !
@@ -87,7 +87,7 @@ router bgp 65001
  !
  address-family l2vpn evpn
   neighbor UNDERLAY activate
-  neighbor UNDERLAY next-hop-unchanged
+  neighbor UNDERLAY attribute-unchanged next-hop
  exit-address-family
 !
 
@@ -96,6 +96,6 @@ Notes
 -------------------------------------------------------------------------------
 - Spines only carry the underlay (IPv4 unicast + EVPN transit); they hold no
   VNIs and no tenant VRFs, so there is no VXLAN/overlay section here.
-- "neighbor UNDERLAY next-hop-unchanged" lets EVPN routes pass through the
-  spine with the originating leaf's VTEP IP intact (route-reflector-less
-  EVPN, spine acts as a BGP transit only).
+- "neighbor UNDERLAY attribute-unchanged next-hop" lets EVPN routes pass
+  through the spine with the originating leaf's VTEP IP intact
+  (route-reflector-less EVPN, spine acts as a BGP transit only).

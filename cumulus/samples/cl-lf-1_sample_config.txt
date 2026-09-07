@@ -1,7 +1,7 @@
 ===============================================================================
 Sample rendered configuration - LEAF01
 ===============================================================================
-This is a plain-text example of what Ansible would render onto leaf01 from
+This is a plain-text example of what Ansible would render onto cl-lf-1 from
 the cumulus_underlay and cumulus_overlay roles' templates. It is for
 reference/reading only and is not consumed by any playbook.
 
@@ -11,7 +11,7 @@ Loopback IP    : 10.0.0.11/32
 VTEP IP        : 10.0.0.11
 Router ASN     : 65011
 Fabric MTU     : 9216
-Uplinks        : swp1 -> spine1, swp2 -> spine2
+Uplinks        : swp1 -> cl-sp-1, swp2 -> cl-sp-2
 
 -------------------------------------------------------------------------------
 /etc/network/interfaces (loopback, uplinks, VXLAN overlay)
@@ -28,12 +28,12 @@ iface lo inet static
 auto swp1
 iface swp1 inet unnumbered lo
     mtu 9216
-    # peer: spine1
+    # peer: cl-sp-1
 
 auto swp2
 iface swp2 inet unnumbered lo
     mtu 9216
-    # peer: spine2
+    # peer: cl-sp-2
 
 # VXLAN EVPN overlay: bridge, per-VLAN L2 VNIs, L3 VNI, distributed anycast
 # gateway SVIs, and the tenant VRF (symmetric IRB).
@@ -114,7 +114,7 @@ iface TENANT_A
 -------------------------------------------------------------------------------
 ! This file is managed by Ansible - do not edit by hand
 frr defaults datacenter
-hostname leaf01
+hostname cl-lf-1
 log syslog informational
 service integrated-vtysh-config
 !
@@ -156,9 +156,9 @@ router bgp 65011 vrf TENANT_A
 -------------------------------------------------------------------------------
 Notes
 -------------------------------------------------------------------------------
-- leaf01 is a plain leaf (not in the border_leaf group), so the vrf-context
+- cl-lf-1 is a plain leaf (not in the border_leaf group), so the vrf-context
   BGP block above has no external eBGP neighbor - it only redistributes
   connected tenant subnets into EVPN type-5 routes.
-- Compare with a border leaf (leaf05/leaf06 + group_vars/border_leaf.yml)
+- Compare with a border leaf (cl-lf-5/cl-lf-6 + group_vars/border_leaf.yml)
   to see the extra "neighbor <external_uplink.peer_ip> remote-as 65100"
   line that leaks routes to the external WAN/MPLS edge.
