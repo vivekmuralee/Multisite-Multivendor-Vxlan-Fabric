@@ -3,6 +3,12 @@
 # Global fabric-wide variables
 # ---------------------------------------------------------------------------
 
+# SSH login + sudo/become password, sourced from the vault-encrypted
+# vault_ansible_password in group_vars/all/vault.yml (never store the
+# plaintext password here - this file is committed to git).
+ansible_password: "{{ vault_ansible_password }}"
+ansible_become_pass: "{{ vault_ansible_password }}"
+
 fabric_mtu: 9216
 
 # Tenant L2 VNIs stretched across every leaf. Every leaf configures the same
