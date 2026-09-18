@@ -1,101 +1,82 @@
 ===============================================================================
 Sample rendered configuration - SPINE1
 ===============================================================================
-This is a plain-text example of what Ansible would render onto cl-sp-1 from
-the cumulus_underlay role's templates. It is for reference/reading only and
-is not consumed by any playbook.
+This is a plain-text example of the "nv set" command sequence Ansible
+generates and stages onto cl-sp-1 from the cumulus_underlay role's
+nv_underlay.sh.j2 template. It is for reference/reading only and is not
+consumed by any playbook - the actual commit happens via "nv config apply"
+after this script runs (see roles/cumulus_underlay/tasks/main.yml).
 
 Role in fabric : spine (device_role: spine)
-Management IP  : 192.168.0.11
+Management IP  : 192.168.122.32
 Loopback IP    : 10.0.0.1/32
 Router ASN     : 65001
 Fabric MTU     : 9216
 Uplinks        : one unnumbered swp per leaf (6 leafs -> swp1-swp6)
 
 -------------------------------------------------------------------------------
-/etc/network/interfaces (loopback + fabric-facing ports)
+nv set commands (loopback + fabric-facing ports + underlay/EVPN-transit BGP)
 -------------------------------------------------------------------------------
-# This file is managed by Ansible - do not edit by hand
+nv set interface lo ip address 10.0.0.1/32
 
-# VTEP source / BGP router-id loopback
-auto lo
-iface lo inet static
-    address 10.0.0.1/32
+nv set interface swp1 link state up
+nv set interface swp1 link mtu 9216
+nv set vrf default router bgp neighbor swp1 type unnumbered
+nv set vrf default router bgp neighbor swp1 peer-group UNDERLAY
 
-# BGP-unnumbered fabric links (no IP addressing needed - eBGP peers over IPv6
-# link-local, RFC 5549). Cabling convention: cl-lf-N's swp1 -> cl-sp-1 swpN,
-# cl-lf-N's swp2 -> cl-sp-2 swpN (N = the leaf's position in the leaf group).
-auto swp1
-iface swp1 inet unnumbered lo
-    mtu 9216
-    # peer: cl-lf-1
+nv set interface swp2 link state up
+nv set interface swp2 link mtu 9216
+nv set vrf default router bgp neighbor swp2 type unnumbered
+nv set vrf default router bgp neighbor swp2 peer-group UNDERLAY
 
-auto swp2
-iface swp2 inet unnumbered lo
-    mtu 9216
-    # peer: cl-lf-2
+nv set interface swp3 link state up
+nv set interface swp3 link mtu 9216
+nv set vrf default router bgp neighbor swp3 type unnumbered
+nv set vrf default router bgp neighbor swp3 peer-group UNDERLAY
 
-auto swp3
-iface swp3 inet unnumbered lo
-    mtu 9216
-    # peer: cl-lf-3
+nv set interface swp4 link state up
+nv set interface swp4 link mtu 9216
+nv set vrf default router bgp neighbor swp4 type unnumbered
+nv set vrf default router bgp neighbor swp4 peer-group UNDERLAY
 
-auto swp4
-iface swp4 inet unnumbered lo
-    mtu 9216
-    # peer: cl-lf-4
+nv set interface swp5 link state up
+nv set interface swp5 link mtu 9216
+nv set vrf default router bgp neighbor swp5 type unnumbered
+nv set vrf default router bgp neighbor swp5 peer-group UNDERLAY
 
-auto swp5
-iface swp5 inet unnumbered lo
-    mtu 9216
-    # peer: cl-lf-5
+nv set interface swp6 link state up
+nv set interface swp6 link mtu 9216
+nv set vrf default router bgp neighbor swp6 type unnumbered
+nv set vrf default router bgp neighbor swp6 peer-group UNDERLAY
 
-auto swp6
-iface swp6 inet unnumbered lo
-    mtu 9216
-    # peer: cl-lf-6
+nv set vrf default router bgp router-id 10.0.0.1
+nv set vrf default router bgp autonomous-system 65001
 
--------------------------------------------------------------------------------
-/etc/frr/frr.conf (underlay BGP - no EVPN overlay on spines)
--------------------------------------------------------------------------------
-! This file is managed by Ansible - do not edit by hand
-frr defaults datacenter
-hostname cl-sp-1
-log syslog informational
-service integrated-vtysh-config
-!
-router bgp 65001
- bgp router-id 10.0.0.1
- bgp bestpath as-path multipath-relax
- no bgp default ipv4-unicast
- neighbor UNDERLAY peer-group
- neighbor UNDERLAY remote-as external
- neighbor UNDERLAY capability extended-nexthop
- neighbor UNDERLAY bfd
- neighbor swp1 interface peer-group UNDERLAY
- neighbor swp2 interface peer-group UNDERLAY
- neighbor swp3 interface peer-group UNDERLAY
- neighbor swp4 interface peer-group UNDERLAY
- neighbor swp5 interface peer-group UNDERLAY
- neighbor swp6 interface peer-group UNDERLAY
- !
- address-family ipv4 unicast
-  network 10.0.0.1/32
-  neighbor UNDERLAY activate
-  maximum-paths 2
- exit-address-family
- !
- address-family l2vpn evpn
-  neighbor UNDERLAY activate
-  neighbor UNDERLAY attribute-unchanged next-hop
- exit-address-family
-!
+nv set vrf default router bgp peer-group UNDERLAY remote-as external
+nv set vrf default router bgp peer-group UNDERLAY bfd enable on
+nv set vrf default router bgp peer-group UNDERLAY address-family ipv4-unicast enable on
+nv set vrf default router bgp peer-group UNDERLAY address-family l2vpn-evpn enable on
+
+nv set vrf default router bgp address-family ipv4-unicast network 10.0.0.1/32
+nv set vrf default router bgp address-family ipv4-unicast multipaths ebgp 2
+nv set vrf default router bgp address-family l2vpn-evpn enable on
+
+nv set vrf default router bgp enable on
+
+nv config apply -y
 
 -------------------------------------------------------------------------------
 Notes
 -------------------------------------------------------------------------------
 - Spines only carry the underlay (IPv4 unicast + EVPN transit); they hold no
-  VNIs and no tenant VRFs, so there is no VXLAN/overlay section here.
-- "neighbor UNDERLAY attribute-unchanged next-hop" lets EVPN routes pass
-  through the spine with the originating leaf's VTEP IP intact
-  (route-reflector-less EVPN, spine acts as a BGP transit only).
+  VNIs and no tenant VRFs, so there is no VXLAN/overlay role applied here
+  (site.yml only applies cumulus_underlay to the "fabric" group, which spines
+  are in, but cumulus_overlay is leaf-only).
+- There's no explicit "attribute-unchanged next-hop" command here (unlike the
+  old raw-FRR frr.conf this used to render) - NVUE's default next-hop-setting
+  ("auto") is FRR's native behaviour for the l2vpn-evpn address family, which
+  already passes EVPN routes through the spine with the originating leaf's
+  VTEP IP intact.
+- No daemon-enable or frr-restart step either - "nv config apply" regenerates
+  frr.conf/daemons and restarts whatever's needed atomically as part of the
+  commit.

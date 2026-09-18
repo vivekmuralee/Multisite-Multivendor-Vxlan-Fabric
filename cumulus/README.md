@@ -23,11 +23,16 @@ of the top-level README).
 
 * Underlay: eBGP unnumbered on every spine-leaf link (unique ASN per
   device), loopbacks advertised as `/32` host routes, ECMP.
-* Overlay: EVPN (`address-family l2vpn evpn`) riding the same eBGP
-  sessions. Spines set `attribute-unchanged next-hop` and act purely as
-  EVPN route reflectors/relays - they hold no VNI/VXLAN state themselves.
-* Leafs: `advertise-all-vni`, distributed anycast gateway (symmetric IRB),
-  one shared anycast MAC across the fabric.
+* Overlay: EVPN (`address-family l2vpn-evpn`) riding the same eBGP
+  sessions. Spines act purely as EVPN route reflectors/relays - they hold
+  no VNI/VXLAN state themselves, and NVUE's default next-hop behaviour for
+  this address family already passes EVPN routes through unchanged (the
+  old raw-FRR config had to say this explicitly; NVUE doesn't).
+* Leafs: every locally-configured VNI is advertised automatically once
+  `nve vxlan` and the vrf's `l2vpn-evpn` address family are enabled (no
+  separate "advertise-all-vni" toggle in NVUE), distributed anycast
+  gateway via VRR (symmetric IRB), one shared anycast MAC across the
+  fabric.
 * Border leafs (`cl-lf-5`, `cl-lf-6`): additional numbered eBGP session in
   the tenant VRF toward the external edge router, redistributing
   `connected`/VRF routes both ways.
@@ -48,7 +53,7 @@ of the top-level README).
 Cabling convention: every leaf's `swp1` goes to `cl-sp-1`, `swp2` goes to
 `cl-sp-2`; on each spine, port `swpN` connects to the Nth leaf in the `leaf`
 group (cl-lf-1 -> swp1, ..., cl-lf-6 -> swp6). Adjust
-`roles/cumulus_underlay/templates/uplinks.intf.j2` if your GNS3 wiring
+`roles/cumulus_underlay/templates/nv_underlay.sh.j2` if your GNS3 wiring
 differs.
 
 Tenant overlay (`group_vars/all/vars.yml`):
@@ -69,20 +74,31 @@ cumulus/
 ├── inventory/hosts.yml          # spine / leaf / border_leaf groups
 ├── group_vars/                  # fabric-wide + per-role defaults
 ├── host_vars/                   # per-device ASN, loopback, uplinks
-├── samples/                     # rendered example configs (cl-lf-1, cl-sp-1) for reference only
+├── samples/                     # rendered example NVUE command sets (cl-lf-1, cl-sp-1) for reference only
 └── roles/
-    ├── cumulus_underlay/        # /etc/network/interfaces.d fragments + frr.conf (all switches)
-    ├── cumulus_overlay/         # VXLAN bridge, VNIs, SVIs, VRF (leafs only)
+    ├── cumulus_underlay/        # loopback, uplinks, underlay/EVPN-transit BGP (all switches)
+    ├── cumulus_overlay/         # VXLAN VNIs, anycast gateway (VRR), tenant VRF (leafs only)
     └── cumulus_border_leaf/     # external uplink + eBGP peering (cl-lf-5/cl-lf-6 only)
 ```
 
-`samples/cl-lf-1_sample_config.txt` and `samples/cl-sp-1_sample_config.txt` show what
-Ansible renders onto a leaf and a spine from the templates above - useful for
-reviewing the expected output without running the playbook against a live device.
+`samples/cl-lf-1_sample_config.txt` and `samples/cl-sp-1_sample_config.txt` show the
+`nv set` command sequence Ansible generates and stages onto a leaf and a spine -
+useful for reviewing the expected config without running the playbook against
+a live device.
 
-Config is pushed as `/etc/network/interfaces.d/*.intf` fragments
-(`00-loopback`, `10-uplinks`, `20-vxlan`, `30-external`) rather than one
-monolithic file, so each role only owns its own fragment.
+**Config is delivered via NVUE**, not by editing `/etc/network/interfaces`
+or `/etc/frr/frr.conf` directly. Cumulus Linux 5.x runs NVUE as the actual
+source of truth for both of those files; editing them by hand (the
+ifupdown2/frr.conf approach this repo used to take) gets silently reverted
+the next time NVUE reconciles, since NVUE doesn't know about changes made
+outside itself. Each role instead renders a small script of `nv set ...`
+commands (see `templates/nv_*.sh.j2`), runs it to stage those changes into
+NVUE's pending revision, then commits everything in one `nv config apply`.
+One practical upshot: there's no separate "enable the FRR daemon" or
+"restart frr" step anywhere in these roles anymore (compare with older
+revisions of this file) - `nv config apply` regenerates `frr.conf`/
+`/etc/frr/daemons` and restarts whatever it needs to, atomically, as part
+of committing the revision.
 
 ## Usage
 
@@ -102,9 +118,11 @@ as needed.
 
 ## Before using this beyond a lab
 
-* Tighten the border-leaf `address-family ipv4 unicast` in
-  `roles/cumulus_underlay/templates/frr.conf.j2` with real prefix-lists /
-  route-maps instead of accepting everything from the WAN edge.
+* Tighten the border-leaf eBGP session in
+  `roles/cumulus_border_leaf/templates/nv_border_leaf.sh.j2` with real
+  prefix-lists / route-maps (`nv set vrf ... router bgp neighbor ...
+  address-family ipv4-unicast policy ...`) instead of accepting everything
+  from the WAN edge.
 * Add MD5/BFD authentication as required by your security policy.
 * If leafs need dual-attached host redundancy, layer in MLAG (peerlink +
   `clagd-vxlan-anycast-ip`) - intentionally left out here to keep the

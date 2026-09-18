@@ -1,4 +1,2 @@
 ---
-- name: reload networking
-  ansible.builtin.command: ifreload -a
-  changed_when: true
+# No handlers needed - see cumulus_underlay/handlers/main.yml for why.

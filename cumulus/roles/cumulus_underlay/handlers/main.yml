@@ -1,9 +1,4 @@
 ---
-- name: reload networking
-  ansible.builtin.command: ifreload -a
-  changed_when: true
-
-- name: restart frr
-  ansible.builtin.systemd:
-    name: frr
-    state: restarted
+# No handlers needed - "nv config apply" (see tasks/main.yml) commits
+# interface, FRR daemon, and frr.conf changes together in one atomic step,
+# so there's nothing left to reload/restart separately.

@@ -1,7 +1,25 @@
 ---
-- name: Push VXLAN bridge / VNI / SVI / VRF fragment
+- name: Render NVUE overlay command set
   ansible.builtin.template:
-    src: vxlan.intf.j2
-    dest: /etc/network/interfaces.d/20-vxlan.intf
-    mode: "0644"
-  notify: reload networking
+    src: nv_overlay.sh.j2
+    dest: /tmp/ansible-nvue-overlay.sh
+    mode: "0755"
+
+- name: Stage NVUE overlay configuration
+  ansible.builtin.command: bash /tmp/ansible-nvue-overlay.sh
+  changed_when: true
+
+- name: Remove rendered NVUE command script
+  ansible.builtin.file:
+    path: /tmp/ansible-nvue-overlay.sh
+    state: absent
+
+- name: Check for pending NVUE configuration changes
+  ansible.builtin.command: nv config diff
+  register: cumulus_overlay_nvue_diff
+  changed_when: false
+
+- name: Apply pending NVUE configuration
+  ansible.builtin.command: nv config apply -y
+  when: cumulus_overlay_nvue_diff.stdout | trim | length > 0
+  changed_when: true

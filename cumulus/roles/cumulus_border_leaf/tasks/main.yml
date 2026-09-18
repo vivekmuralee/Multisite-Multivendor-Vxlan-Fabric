@@ -1,7 +1,25 @@
 ---
-- name: Push external (WAN/MPLS edge) uplink fragment
+- name: Render NVUE border-leaf command set
   ansible.builtin.template:
-    src: external.intf.j2
-    dest: /etc/network/interfaces.d/30-external.intf
-    mode: "0644"
-  notify: reload networking
+    src: nv_border_leaf.sh.j2
+    dest: /tmp/ansible-nvue-border-leaf.sh
+    mode: "0755"
+
+- name: Stage NVUE border-leaf configuration
+  ansible.builtin.command: bash /tmp/ansible-nvue-border-leaf.sh
+  changed_when: true
+
+- name: Remove rendered NVUE command script
+  ansible.builtin.file:
+    path: /tmp/ansible-nvue-border-leaf.sh
+    state: absent
+
+- name: Check for pending NVUE configuration changes
+  ansible.builtin.command: nv config diff
+  register: cumulus_border_leaf_nvue_diff
+  changed_when: false
+
+- name: Apply pending NVUE configuration
+  ansible.builtin.command: nv config apply -y
+  when: cumulus_border_leaf_nvue_diff.stdout | trim | length > 0
+  changed_when: true
