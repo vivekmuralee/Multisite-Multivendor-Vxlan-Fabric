@@ -20,32 +20,32 @@ nv set commands (loopback + fabric-facing ports + underlay/EVPN-transit BGP)
 nv set interface lo ip address 10.0.0.1/32
 
 nv set interface swp1 link state up
-nv set interface swp1 link mtu 9216
+nv set interface swp1 link mtu 9215
 nv set vrf default router bgp neighbor swp1 type unnumbered
 nv set vrf default router bgp neighbor swp1 peer-group UNDERLAY
 
 nv set interface swp2 link state up
-nv set interface swp2 link mtu 9216
+nv set interface swp2 link mtu 9215
 nv set vrf default router bgp neighbor swp2 type unnumbered
 nv set vrf default router bgp neighbor swp2 peer-group UNDERLAY
 
 nv set interface swp3 link state up
-nv set interface swp3 link mtu 9216
+nv set interface swp3 link mtu 9215
 nv set vrf default router bgp neighbor swp3 type unnumbered
 nv set vrf default router bgp neighbor swp3 peer-group UNDERLAY
 
 nv set interface swp4 link state up
-nv set interface swp4 link mtu 9216
+nv set interface swp4 link mtu 9215
 nv set vrf default router bgp neighbor swp4 type unnumbered
 nv set vrf default router bgp neighbor swp4 peer-group UNDERLAY
 
 nv set interface swp5 link state up
-nv set interface swp5 link mtu 9216
+nv set interface swp5 link mtu 9215
 nv set vrf default router bgp neighbor swp5 type unnumbered
 nv set vrf default router bgp neighbor swp5 peer-group UNDERLAY
 
 nv set interface swp6 link state up
-nv set interface swp6 link mtu 9216
+nv set interface swp6 link mtu 9215
 nv set vrf default router bgp neighbor swp6 type unnumbered
 nv set vrf default router bgp neighbor swp6 peer-group UNDERLAY
 

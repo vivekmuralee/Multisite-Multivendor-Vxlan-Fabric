@@ -22,12 +22,12 @@ nv set commands - cumulus_underlay (loopback, uplinks, underlay/EVPN-transit BGP
 nv set interface lo ip address 10.0.0.11/32
 
 nv set interface swp1 link state up
-nv set interface swp1 link mtu 9216
+nv set interface swp1 link mtu 9215
 nv set vrf default router bgp neighbor swp1 type unnumbered
 nv set vrf default router bgp neighbor swp1 peer-group UNDERLAY
 
 nv set interface swp2 link state up
-nv set interface swp2 link mtu 9216
+nv set interface swp2 link mtu 9215
 nv set vrf default router bgp neighbor swp2 type unnumbered
 nv set vrf default router bgp neighbor swp2 peer-group UNDERLAY
 
@@ -69,7 +69,7 @@ nv set interface vlan20 vlan 20
 nv set interface vlan20 ip vrf TENANT_A
 nv set interface vlan20 ip vrr enable on
 nv set interface vlan20 ip vrr address 10.10.20.1/24
-nv set interface vlan20 ip vrr mac-address 44:38:39:ff:00:01
+nv set interface vlan20 ip vrr mac-address 44:38:39:ff:00:02
 
 # DB - VLAN 30 / VNI 10030 - distributed anycast gateway
 nv set bridge domain br_default vlan 30 vni 10030
@@ -78,7 +78,7 @@ nv set interface vlan30 vlan 30
 nv set interface vlan30 ip vrf TENANT_A
 nv set interface vlan30 ip vrr enable on
 nv set interface vlan30 ip vrr address 10.10.30.1/24
-nv set interface vlan30 ip vrr mac-address 44:38:39:ff:00:01
+nv set interface vlan30 ip vrr mac-address 44:38:39:ff:00:03
 
 # L3 VNI - carries routed (symmetric IRB) traffic between tenant subnets
 nv set bridge domain br_default vlan 100 vni 10100

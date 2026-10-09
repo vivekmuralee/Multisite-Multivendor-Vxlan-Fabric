@@ -1,0 +1,114 @@
+===============================================================================
+Sample rendered configuration - LEAF03
+===============================================================================
+This is a plain-text example of the "nv set" command sequence Ansible
+generates and stages onto cl-lf-3 from the cumulus_underlay and
+cumulus_overlay roles' nv_underlay.sh.j2 / nv_overlay.sh.j2 templates. It is
+for reference/reading only and is not consumed by any playbook - each role
+commits its own staged commands via a separate "nv config apply" (see
+roles/cumulus_underlay/tasks/main.yml and roles/cumulus_overlay/tasks/main.yml).
+
+Role in fabric : leaf (device_role: leaf, not a border leaf)
+Management IP  : 192.168.122.36
+Loopback IP    : 10.0.0.13/32
+VTEP IP        : 10.0.0.13
+Router ASN     : 65013
+Fabric MTU     : 9216
+Uplinks        : swp1 -> cl-sp-1, swp2 -> cl-sp-2
+
+-------------------------------------------------------------------------------
+nv set commands - cumulus_underlay (loopback, uplinks, underlay/EVPN-transit BGP)
+-------------------------------------------------------------------------------
+nv set interface lo ip address 10.0.0.13/32
+
+nv set interface swp1 link state up
+nv set interface swp1 link mtu 9215
+nv set vrf default router bgp neighbor swp1 type unnumbered
+nv set vrf default router bgp neighbor swp1 peer-group UNDERLAY
+
+nv set interface swp2 link state up
+nv set interface swp2 link mtu 9215
+nv set vrf default router bgp neighbor swp2 type unnumbered
+nv set vrf default router bgp neighbor swp2 peer-group UNDERLAY
+
+nv set vrf default router bgp router-id 10.0.0.13
+nv set vrf default router bgp autonomous-system 65013
+
+nv set vrf default router bgp peer-group UNDERLAY remote-as external
+nv set vrf default router bgp peer-group UNDERLAY bfd enable on
+nv set vrf default router bgp peer-group UNDERLAY address-family ipv4-unicast enable on
+nv set vrf default router bgp peer-group UNDERLAY address-family l2vpn-evpn enable on
+
+nv set vrf default router bgp address-family ipv4-unicast network 10.0.0.13/32
+nv set vrf default router bgp address-family ipv4-unicast multipaths ebgp 2
+nv set vrf default router bgp address-family l2vpn-evpn enable on
+
+nv set vrf default router bgp enable on
+
+nv config apply -y
+
+-------------------------------------------------------------------------------
+nv set commands - cumulus_overlay (VXLAN VNIs, anycast gateway, tenant VRF)
+-------------------------------------------------------------------------------
+nv set nve vxlan enable on
+nv set nve vxlan source address 10.0.0.13
+
+# WEB - VLAN 10 / VNI 10010 - distributed anycast gateway
+nv set bridge domain br_default vlan 10 vni 10010
+nv set interface vlan10 type svi
+nv set interface vlan10 vlan 10
+nv set interface vlan10 ip vrf TENANT_A
+nv set interface vlan10 ip vrr enable on
+nv set interface vlan10 ip vrr address 10.10.10.1/24
+nv set interface vlan10 ip vrr mac-address 44:38:39:ff:00:01
+
+# APP - VLAN 20 / VNI 10020 - distributed anycast gateway
+nv set bridge domain br_default vlan 20 vni 10020
+nv set interface vlan20 type svi
+nv set interface vlan20 vlan 20
+nv set interface vlan20 ip vrf TENANT_A
+nv set interface vlan20 ip vrr enable on
+nv set interface vlan20 ip vrr address 10.10.20.1/24
+nv set interface vlan20 ip vrr mac-address 44:38:39:ff:00:02
+
+# DB - VLAN 30 / VNI 10030 - distributed anycast gateway
+nv set bridge domain br_default vlan 30 vni 10030
+nv set interface vlan30 type svi
+nv set interface vlan30 vlan 30
+nv set interface vlan30 ip vrf TENANT_A
+nv set interface vlan30 ip vrr enable on
+nv set interface vlan30 ip vrr address 10.10.30.1/24
+nv set interface vlan30 ip vrr mac-address 44:38:39:ff:00:03
+
+# L3 VNI - carries routed (symmetric IRB) traffic between tenant subnets
+nv set bridge domain br_default vlan 100 vni 10100
+nv set interface vlan100 type svi
+nv set interface vlan100 vlan 100
+nv set interface vlan100 ip vrf TENANT_A
+
+# Tenant VRF
+nv set vrf TENANT_A router bgp enable on
+nv set vrf TENANT_A router bgp address-family ipv4-unicast enable on
+nv set vrf TENANT_A router bgp address-family ipv4-unicast redistribute connected enable on
+nv set vrf TENANT_A router bgp address-family l2vpn-evpn enable on
+nv set vrf TENANT_A evpn enable on
+nv set vrf TENANT_A evpn vlan 100
+nv set vrf TENANT_A evpn vni 10100
+
+nv config apply -y
+
+-------------------------------------------------------------------------------
+Notes
+-------------------------------------------------------------------------------
+- cl-lf-3 is a plain leaf (not in the border_leaf group), so there's no
+  cumulus_border_leaf role applied here - just the tenant vrf's BGP instance
+  redistributing connected subnets into EVPN type-5 routes.
+- Compare with a border leaf (cl-lf-5/cl-lf-6) to see the extra numbered
+  eBGP neighbor (roles/cumulus_border_leaf/templates/nv_border_leaf.sh.j2)
+  that leaks routes to the external WAN/MPLS edge - "nv set vrf TENANT_A
+  router bgp neighbor 192.168.100.2 remote-as 65100".
+- No separate "advertise-all-vni"/"advertise-default-gw" commands - NVUE
+  advertises every locally-configured VNI automatically once nve vxlan and
+  the vrf's l2vpn-evpn address family are enabled, and the default-gateway
+  route-advertise knob is specifically for centralized-gateway designs, not
+  the distributed/VRR-based anycast gateway used here.
