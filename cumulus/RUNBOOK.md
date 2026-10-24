@@ -14,8 +14,8 @@ no equivalent). Run them on the switch unless stated.
 | Mgmt IPs | sp-1 .32, sp-2 .33, lf-1 .34 ... lf-6 .39 (192.168.122.0/24) |
 | Underlay | eBGP unnumbered on swp1 (to sp-1) and swp2 (to sp-2) on leafs, peer-group `UNDERLAY`, BFD on |
 | Tenant VRF | `TENANT_A`, L3 VNI `10100` (VLAN 100) |
-| L2 VNIs | VLAN 10 / VNI 10010 (10.10.10.0/24), VLAN 20 / 10020 (10.10.20.0/24), VLAN 30 / 10030 (10.10.30.0/24) |
-| Anycast GW | `.1` in each subnet, VRR MACs `44:38:39:ff:00:01..03` |
+| L2 VNIs | VLAN 10 / VNI 10010 (10.20.10.0/24), VLAN 20 / 10020 (10.20.20.0/24), VLAN 30 / 10030 (10.20.30.0/24) |
+| Anycast GW | `.254` in each subnet, VRR MACs `44:38:39:ff:00:01..03` |
 | MTU | 9216 fabric, 9215 on swp links |
 | Border leafs | cl-lf-5 / cl-lf-6 `swp3` -> WAN/MPLS edge (AS 65100), peer `192.168.100.2` on lf-5 (check `host_vars` for lf-6) |
 
@@ -260,9 +260,9 @@ Goal: given a MAC (or IP), find which leaf and port it sits on.
 ### Step 1 - find the MAC from the IP (any leaf)
 
 ```bash
-ip neigh show vrf $VRF | grep 10.10.10.50
-sudo vtysh -c "show evpn arp-cache vni 10010" | grep 10.10.10.50
-sudo vtysh -c "show bgp l2vpn evpn route type macip" | grep -B1 -A4 10.10.10.50
+ip neigh show vrf $VRF | grep 10.20.10.50
+sudo vtysh -c "show evpn arp-cache vni 10010" | grep 10.20.10.50
+sudo vtysh -c "show bgp l2vpn evpn route type macip" | grep -B1 -A4 10.20.10.50
 ```
 
 ### Step 2 - locate the MAC
@@ -312,7 +312,7 @@ ip neigh show vrf $VRF
 
 Checks:
 
-* Local subnets 10.10.10/20/30.0/24 as connected; remote subnets as `via <RMAC-VTEP> dev vlan100 onlink` (L3VNI SVI) with `proto bgp`.
+* Local subnets 10.20.10/20/30.0/24 as connected; remote subnets as `via <RMAC-VTEP> dev vlan100 onlink` (L3VNI SVI) with `proto bgp`.
 * Same VRR IP/MAC on every leaf (`44:38:39:ff:00:0X`).
 * Symmetric IRB: from lf-1, a host route to a remote-subnet host (learned via type-2 with IP) points to remote VTEP over vlan100.
 
@@ -343,10 +343,10 @@ ping -c3 -I swp1 <spine-LL-or-loopback>
 From lf-1, via the anycast gateway on VLAN 10 to a host/SVI on another leaf:
 
 ```bash
-sudo ip vrf exec $VRF ping -c3 -I vlan10 10.10.20.1          # local GW, sanity
-sudo ip vrf exec $VRF ping -c3 -I vlan10 10.10.20.50         # host in other subnet behind lf-3
-sudo ip vrf exec $VRF traceroute -n -s 10.10.10.1 10.10.20.50
-ping -c3 -I vlan10 10.10.10.60 -M do -s 1422                 # same-subnet (L2 VNI) host, DF set, 1500-MTU hosts
+sudo ip vrf exec $VRF ping -c3 -I vlan10 10.20.20.254          # local GW, sanity
+sudo ip vrf exec $VRF ping -c3 -I vlan10 10.20.20.50         # host in other subnet behind lf-3
+sudo ip vrf exec $VRF traceroute -n -s 10.20.10.254 10.20.20.50
+ping -c3 -I vlan10 10.20.10.60 -M do -s 1422                 # same-subnet (L2 VNI) host, DF set, 1500-MTU hosts
 ```
 
 Same-subnet test (L2 VNI) uses a host in VLAN 10 on a remote leaf; if it fails
@@ -366,11 +366,11 @@ sudo vtysh -c "show bgp vrf $VRF ipv4 unicast neighbors 192.168.100.2 advertised
 sudo vtysh -c "show bgp vrf $VRF ipv4 unicast neighbors 192.168.100.2 routes"
 sudo ip vrf exec $VRF ping -c3 192.168.100.2
 sudo ip vrf exec $VRF ping -c3 -I vlan10 <external-prefix-host>
-sudo ip vrf exec $VRF traceroute -n -s 10.10.10.1 <external-ip>
+sudo ip vrf exec $VRF traceroute -n -s 10.20.10.254 <external-ip>
 
 # On a normal leaf (cl-lf-1): external reachable through border VTEP
 nv show vrf $VRF router rib ipv4 route <external-prefix>
-sudo ip vrf exec $VRF traceroute -n -s 10.10.10.1 <external-ip>
+sudo ip vrf exec $VRF traceroute -n -s 10.20.10.254 <external-ip>
 ```
 
 Expected from lf-1 toward external: next-hop = border leaf RMAC/VTEP (10.0.0.15
@@ -378,7 +378,7 @@ and/or 10.0.0.16), first visible hop is the border leaf VRF address, then the WA
 (192.168.100.2 or the lf-6 equivalent), then the WAN.
 
 Reverse direction: from the external router confirm it received the fabric subnets
-(10.10.10.0/24 ... 10.10.30.0/24) from AS 65015/65016 and can reach the tenant gateway.
+(10.20.10.0/24 ... 10.20.30.0/24) from AS 65015/65016 and can reach the tenant gateway.
 
 ### 8.5 Packet capture (last resort)
 
@@ -420,14 +420,14 @@ Host A cannot reach Host B
 |     +-- Underlay ping loopback-to-loopback ok?            no -> 3, 2
 |
 +-- Different subnet (L3 VNI)?
-|     +-- Gateway 10.10.x.1 reachable from A?               no -> 7 (VRR, SVI)
+|     +-- Gateway 10.20.x.254 reachable from A?               no -> 7 (VRR, SVI)
 |     +-- Route to B's subnet / host in VRF on A's leaf?    no -> 5.4/5.5, 4.3
 |     +-- show vrf vni = Up, RMACs for remote VTEP present? no -> 4.3
 |
 +-- External?
       +-- Border leaf eBGP to WAN Established?              no -> 8.4
       +-- Default/prefix received and exported as type-5?   no -> 5.5
-      +-- Return route on WAN edge for 10.10.x.0/24?        no -> 8.4 (advertised-routes)
+      +-- Return route on WAN edge for 10.20.x.0/24?        no -> 8.4 (advertised-routes)
 ```
 
 Common faults:
@@ -441,6 +441,8 @@ Common faults:
 | L3 traffic black-holed | VRF `evpn vni` missing, `show vrf vni` down, no RMAC |
 | Intermittent loss to one host | Duplicate MAC/IP (`duplicate`), MAC mobility flapping |
 | Config applied but no effect | `nv config diff`, `nv config history`, `nv config show -o commands` |
+| `ifreload-nvue.service` fails: "mixing traditional vxlan with single vxlan device", "Address already in use" | Pre-NVUE `/etc/network/interfaces.d/*.intf` fragments still present. Move them out, `ip link del` old `vniNNNNN` devices, `sudo ifreload -a` (see "Before you start" in `samples/`) |
+| `show vrf vni` State Down, VxLAN IF `vniNNNNN` instead of `vxlan48` | Same cause as above: old traditional VXLAN devices in use |
 
 ## 11. Running checks across the fabric with Ansible
 

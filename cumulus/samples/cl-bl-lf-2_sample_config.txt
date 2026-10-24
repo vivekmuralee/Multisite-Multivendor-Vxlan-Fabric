@@ -1,0 +1,238 @@
+===============================================================================
+Hand-apply configuration guide - BORDER LEAF 2 (cl-bl-lf-2)
+===============================================================================
+Step-by-step NVUE configuration for cl-bl-lf-2, applied by hand one layer at a
+time. Each step stages "nv set" commands, applies them, then verifies the
+result before moving on.
+
+Every line starting with "#" is a shell comment, so a whole step block can be
+pasted into the switch CLI as-is.
+
+Role in fabric : border leaf (same tenant VRF / VLANs / VNIs as the leafs,
+                 plus an external eBGP peering to the WAN / MPLS edge)
+Management IP  : 192.168.122.39
+Loopback IP    : 10.0.0.16/32
+VTEP IP        : 10.0.0.16
+Router ASN     : 65016
+Fabric MTU     : 9216 (9215 on swp links)
+Uplinks        : swp1 -> cl-sp-1, swp2 -> cl-sp-2
+External link  : swp3 -> WAN/MPLS edge, 192.168.101.1/30 <-> 192.168.101.2
+                 (external ASN 65100)
+
+NOTE: values follow the cl-lf-6 host_vars (border leaf 2). If cl-bl-lf-2 is a
+different box from cl-lf-6, change the management IP, loopback/VTEP, ASN, the
+external subnet and the spine-facing swp numbers to match your cabling.
+
+Tenant design (identical to every other leaf)
+  VRF TENANT_A, L3 VNI 10100 (VLAN 100)
+  VLAN 10 / VNI 10010  WEB  10.20.10.0/24  gw 10.20.10.254
+  VLAN 20 / VNI 10020  APP  10.20.20.0/24  gw 10.20.20.254
+  VLAN 30 / VNI 10030  DB   10.20.30.0/24  gw 10.20.30.254
+
+-------------------------------------------------------------------------------
+Before you start
+-------------------------------------------------------------------------------
+# Anything staged but not applied? (should print nothing)
+nv config diff
+
+# Throw away a half-staged change if you need to start a step again
+#   nv config detach
+
+# Leftover pre-NVUE ifupdown2 fragments break ifreload - move them out:
+ls -l /etc/network/interfaces.d/
+sudo mkdir -p /root/pre-nvue-backup
+sudo mv /etc/network/interfaces.d/*.intf /root/pre-nvue-backup/ 2>/dev/null
+ls /etc/network/interfaces.d/
+ip -br link | grep -E "^vni[0-9]+"                # none expected
+
+-------------------------------------------------------------------------------
+Step 1 - Loopback and fabric uplinks
+-------------------------------------------------------------------------------
+nv set interface lo ip address 10.0.0.16/32
+
+nv set interface swp1 link state up
+nv set interface swp1 link mtu 9215
+nv set interface swp2 link state up
+nv set interface swp2 link mtu 9215
+
+nv config apply -y
+
+# Verify
+nv show interface lo ip address           # 10.0.0.16/32
+nv show interface --view=brief            # swp1/swp2 up, MTU 9215
+nv show service lldp neighbor             # swp1 -> cl-sp-1, swp2 -> cl-sp-2
+
+-------------------------------------------------------------------------------
+Step 2 - Underlay BGP (eBGP unnumbered) + EVPN address family
+-------------------------------------------------------------------------------
+# Global BGP identity (inherited by vrf default and vrf TENANT_A).
+nv set router bgp autonomous-system 65016
+nv set router bgp router-id 10.0.0.16
+nv set router bgp enable on
+
+nv set vrf default router bgp peer-group UNDERLAY remote-as external
+nv set vrf default router bgp peer-group UNDERLAY bfd enable on
+nv set vrf default router bgp peer-group UNDERLAY address-family ipv4-unicast enable on
+nv set vrf default router bgp peer-group UNDERLAY address-family l2vpn-evpn enable on
+
+nv set vrf default router bgp neighbor swp1 type unnumbered
+nv set vrf default router bgp neighbor swp1 peer-group UNDERLAY
+nv set vrf default router bgp neighbor swp2 type unnumbered
+nv set vrf default router bgp neighbor swp2 peer-group UNDERLAY
+
+nv set vrf default router bgp address-family ipv4-unicast network 10.0.0.16/32
+nv set vrf default router bgp address-family ipv4-unicast multipaths ebgp 2
+nv set vrf default router bgp address-family l2vpn-evpn enable on
+
+nv set vrf default router bgp enable on
+
+nv config apply -y
+
+# Verify
+nv show vrf default router bgp neighbor           # swp1, swp2 established
+sudo vtysh -c "show bgp summary"
+sudo vtysh -c "show bgp l2vpn evpn summary"
+ping -c3 -I lo 10.0.0.1                           # spine loopback reachable
+
+-------------------------------------------------------------------------------
+Step 3 - VXLAN tunnel endpoint (VTEP)
+-------------------------------------------------------------------------------
+nv set nve vxlan enable on
+nv set nve vxlan source address 10.0.0.16
+
+nv config apply -y
+
+# Verify
+nv show nve vxlan                                 # enabled, source 10.0.0.16
+
+-------------------------------------------------------------------------------
+Step 4 - Tenant VRF and L3 VNI (symmetric IRB)
+-------------------------------------------------------------------------------
+# Same ASN/router-id lines as step 2, repeated so this step works on its own.
+nv set router bgp autonomous-system 65016
+nv set router bgp router-id 10.0.0.16
+nv set router bgp enable on
+
+# Remove any hand-made L3 VNI mapping (ignore messages if none exists).
+nv unset bridge domain br_default vlan 100
+nv unset interface vlan100
+
+# BGP instance inside the tenant vrf. "redistribute connected" turns the
+# tenant subnets into EVPN type-5 routes.
+nv set vrf TENANT_A router bgp enable on
+nv set vrf TENANT_A router bgp address-family ipv4-unicast enable on
+nv set vrf TENANT_A router bgp address-family ipv4-unicast redistribute connected enable on
+nv set vrf TENANT_A router bgp address-family l2vpn-evpn enable on
+
+# Bind the L3 VNI. NVUE creates VLAN 100 -> VNI 10100 and the vlan100 SVI itself;
+# do NOT add them by hand.
+nv set vrf TENANT_A evpn enable on
+nv set vrf TENANT_A evpn vlan 100
+nv set vrf TENANT_A evpn vni 10100
+
+nv config diff -o commands
+nv config apply -y
+
+# Verify
+nv show vrf TENANT_A evpn                         # L3 VNI 10100, router MAC
+sudo vtysh -c "show vrf vni"                      # TENANT_A 10100 ... Up
+nv show evpn vni                                  # 10100 listed as L3
+
+-------------------------------------------------------------------------------
+Step 5 - L2 VNIs and distributed anycast gateways (L2 extension)
+-------------------------------------------------------------------------------
+# Same VLANs, VNIs, gateway IPs and VRR MACs as every other leaf, so the
+# border leaf is a full member of each stretched L2 segment and an anycast
+# gateway for each subnet.
+
+# WEB - VLAN 10 / VNI 10010
+nv set bridge domain br_default vlan 10 vni 10010
+nv set interface vlan10 type svi
+nv set interface vlan10 vlan 10
+nv set interface vlan10 ip vrf TENANT_A
+nv set interface vlan10 ip vrr enable on
+nv set interface vlan10 ip vrr address 10.20.10.254/24
+nv set interface vlan10 ip vrr mac-address 44:38:39:ff:00:01
+
+# APP - VLAN 20 / VNI 10020
+nv set bridge domain br_default vlan 20 vni 10020
+nv set interface vlan20 type svi
+nv set interface vlan20 vlan 20
+nv set interface vlan20 ip vrf TENANT_A
+nv set interface vlan20 ip vrr enable on
+nv set interface vlan20 ip vrr address 10.20.20.254/24
+nv set interface vlan20 ip vrr mac-address 44:38:39:ff:00:02
+
+# DB - VLAN 30 / VNI 10030
+nv set bridge domain br_default vlan 30 vni 10030
+nv set interface vlan30 type svi
+nv set interface vlan30 vlan 30
+nv set interface vlan30 ip vrf TENANT_A
+nv set interface vlan30 ip vrr enable on
+nv set interface vlan30 ip vrr address 10.20.30.254/24
+nv set interface vlan30 ip vrr mac-address 44:38:39:ff:00:03
+
+nv config apply -y
+
+# Verify
+nv show bridge domain br_default vlan             # 10/20/30 -> VNIs
+nv show evpn vni                                  # 10010/10020/10030 L2 + 10100 L3
+nv show interface vlan10 ip vrr                   # 10.20.10.254/24
+sudo vtysh -c "show bgp l2vpn evpn route type multicast"   # type-3 from all leafs
+sudo vtysh -c "show evpn vni 10010"               # remote VTEPs
+ip route show vrf TENANT_A
+
+-------------------------------------------------------------------------------
+Step 6 - External uplink and eBGP to the WAN / MPLS edge (L3 extension)
+-------------------------------------------------------------------------------
+# swp3 is placed in TENANT_A with a numbered /30. The WAN edge is outside the
+# unnumbered underlay, so this is a numbered eBGP session inside the tenant vrf.
+nv set interface swp3 description "Uplink to MPLS-PE / WAN Edge (border leaf 2)"
+nv set interface swp3 link state up
+nv set interface swp3 link mtu 9216
+nv set interface swp3 ip address 192.168.101.1/30
+nv set interface swp3 ip vrf TENANT_A
+
+nv set vrf TENANT_A router bgp neighbor 192.168.101.2 type numbered
+nv set vrf TENANT_A router bgp neighbor 192.168.101.2 remote-as 65100
+nv set vrf TENANT_A router bgp neighbor 192.168.101.2 address-family ipv4-unicast enable on
+
+# Optional: tighten with route-maps / prefix-lists before production use, e.g.
+# only advertise 10.20.0.0/16 to the WAN and accept a default route from it.
+#   nv set router policy prefix-list TENANT_OUT rule 10 action permit
+#   nv set router policy prefix-list TENANT_OUT rule 10 match 10.20.0.0/16 max-prefix-len 24
+#   nv set router policy route-map TO_WAN rule 10 action permit
+#   nv set router policy route-map TO_WAN rule 10 match ip-prefix-list TENANT_OUT
+#   nv set vrf TENANT_A router bgp neighbor 192.168.101.2 address-family ipv4-unicast policy outbound route-map TO_WAN
+
+nv config apply -y
+
+# Verify
+nv show interface swp3                            # up, 192.168.101.1/30, vrf TENANT_A
+ping -c3 -I TENANT_A 192.168.101.2                # (or: ip vrf exec TENANT_A ping ...)
+nv show vrf TENANT_A router bgp neighbor          # 192.168.101.2 established
+sudo vtysh -c "show bgp vrf TENANT_A ipv4 unicast summary"
+sudo vtysh -c "show bgp vrf TENANT_A ipv4 unicast"    # WAN prefixes + tenant /24s
+sudo vtysh -c "show bgp l2vpn evpn route type prefix" # type-5 for WAN routes
+ip route show vrf TENANT_A
+
+-------------------------------------------------------------------------------
+Step 7 - Save
+-------------------------------------------------------------------------------
+nv config save
+nv config show -o commands
+nv config history | head -5
+
+-------------------------------------------------------------------------------
+Notes
+-------------------------------------------------------------------------------
+- Unlike cl-lf-1..4 there are no endpoint access ports in this sample: the
+  border leaf's host-facing role is the WAN link in step 6. Add access ports
+  as in step 6 of cl-lf-1 if you want test hosts here too.
+- Dual border leafs: cl-bl-lf-1 should use its own /30 (e.g. 192.168.100.0/30)
+  and ASN/loopback. Both advertise external routes as type-5 with their own
+  VTEP as next-hop, so other leafs get two ECMP paths.
+- Both border leafs and the WAN edge should be in different ASNs from each
+  other; if both WAN edge routers share an ASN, no extra config is needed.
+- The spines need a downlink neighbor for this box (swpN type unnumbered in
+  peer-group UNDERLAY) - see the cl-sp-1/cl-sp-2 samples.

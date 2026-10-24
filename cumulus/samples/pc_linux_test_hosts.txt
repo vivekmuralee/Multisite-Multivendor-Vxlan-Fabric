@@ -1,0 +1,237 @@
+===============================================================================
+Linux test hosts (PC-1 .. PC-4) - IP configuration
+===============================================================================
+Run these commands on the Linux PCs, NOT on the switches. The leaf side
+(access ports) is Step 6 of samples/cl-lf-N_sample_config.txt.
+
+| PC   | Leaf / port   | VLAN | VNI   | IP address      | Gateway (anycast VRR) |
+|------|---------------|------|-------|-----------------|-----------------------|
+| PC-1 | cl-lf-1 swp3  | 10   | 10010 | 10.20.10.11/24  | 10.20.10.254          |
+| PC-2 | cl-lf-2 swp4  | 20   | 10020 | 10.20.20.12/24  | 10.20.20.254          |
+| PC-3 | cl-lf-3 swp5  | 30   | 10030 | 10.20.30.13/24  | 10.20.30.254          |
+| PC-4 | cl-lf-4 swp3  | 10   | 10010 | 10.20.10.14/24  | 10.20.10.254          |
+
+What each pair tests:
+  PC-1 <-> PC-4   same VLAN, different leafs  -> L2 VNI 10010 (bridged, type-2/3)
+  PC-1 <-> PC-2   different VLANs             -> routed over L3 VNI 10100
+  PC-1 <-> PC-3   different VLANs             -> routed over L3 VNI 10100
+
+TinyCore Linux PCs: see the "TinyCore Linux PCs" section further down
+(BusyBox ifconfig/route, eth0, persistence via /opt/bootlocal.sh).
+
+Replace "eth1" below with the PC's NIC that is cabled to the leaf. Find it with:
+  ip -br link
+
+The examples add a route for the fabric tenant range (10.20.0.0/16) only, so
+the PC keeps its own default route / management access. To send everything
+through the fabric (e.g. to test the border leafs / external network), use
+the "default route" line instead.
+
+-------------------------------------------------------------------------------
+PC-1  (cl-lf-1 swp3, VLAN 10)
+-------------------------------------------------------------------------------
+# Temporary (lost on reboot)
+sudo ip link set eth1 up
+sudo ip addr flush dev eth1
+sudo ip addr add 10.20.10.11/24 dev eth1
+sudo ip route replace 10.20.0.0/16 via 10.20.10.254 dev eth1
+#   default route instead:  sudo ip route replace default via 10.20.10.254 dev eth1
+
+# Persistent - Ubuntu / netplan: create /etc/netplan/60-fabric.yaml, then "sudo netplan apply"
+#   network:
+#     version: 2
+#     ethernets:
+#       eth1:
+#         addresses: [10.20.10.11/24]
+#         routes:
+#           - to: 10.20.0.0/16
+#             via: 10.20.10.254
+
+# Persistent - RHEL / Rocky / Fedora / NetworkManager
+#   sudo nmcli con add type ethernet ifname eth1 con-name fabric \
+#       ipv4.method manual ipv4.addresses 10.20.10.11/24 \
+#       ipv4.routes "10.20.0.0/16 10.20.10.254"
+#   sudo nmcli con up fabric
+
+# Verify
+ip -br addr show eth1                 # 10.20.10.11/24, UP
+ip route get 10.20.20.12              # via 10.20.10.254 dev eth1
+ping -c3 10.20.10.254                 # anycast gateway on cl-lf-1
+ip neigh show dev eth1                # gateway MAC 44:38:39:ff:00:01
+
+# Tests
+ping -c3 10.20.10.14                  # PC-4: same VLAN on cl-lf-4 (L2 VNI 10010)
+ping -c3 10.20.20.12                  # PC-2: VLAN 20 on cl-lf-2 (L3 VNI 10100)
+ping -c3 10.20.30.13                  # PC-3: VLAN 30 on cl-lf-3 (L3 VNI 10100)
+traceroute -n 10.20.20.12             # hop 1: 10.20.10.254, hop 2: PC-2
+ping -c3 -M do -s 1472 10.20.10.14    # full 1500-byte frame, DF set
+
+-------------------------------------------------------------------------------
+PC-2  (cl-lf-2 swp4, VLAN 20)
+-------------------------------------------------------------------------------
+sudo ip link set eth1 up
+sudo ip addr flush dev eth1
+sudo ip addr add 10.20.20.12/24 dev eth1
+sudo ip route replace 10.20.0.0/16 via 10.20.20.254 dev eth1
+#   default route instead:  sudo ip route replace default via 10.20.20.254 dev eth1
+#   netplan: addresses [10.20.20.12/24], route 10.20.0.0/16 via 10.20.20.254
+#   nmcli:   ipv4.addresses 10.20.20.12/24 ipv4.routes "10.20.0.0/16 10.20.20.254"
+
+ip -br addr show eth1
+ping -c3 10.20.20.254                 # anycast gateway on cl-lf-2
+ping -c3 10.20.10.11                  # PC-1 (routed)
+ping -c3 10.20.30.13                  # PC-3 (routed)
+
+-------------------------------------------------------------------------------
+PC-3  (cl-lf-3 swp5, VLAN 30)
+-------------------------------------------------------------------------------
+sudo ip link set eth1 up
+sudo ip addr flush dev eth1
+sudo ip addr add 10.20.30.13/24 dev eth1
+sudo ip route replace 10.20.0.0/16 via 10.20.30.254 dev eth1
+#   default route instead:  sudo ip route replace default via 10.20.30.254 dev eth1
+#   netplan: addresses [10.20.30.13/24], route 10.20.0.0/16 via 10.20.30.254
+#   nmcli:   ipv4.addresses 10.20.30.13/24 ipv4.routes "10.20.0.0/16 10.20.30.254"
+
+ip -br addr show eth1
+ping -c3 10.20.30.254                 # anycast gateway on cl-lf-3
+ping -c3 10.20.10.11                  # PC-1 (routed)
+ping -c3 10.20.20.12                  # PC-2 (routed)
+
+-------------------------------------------------------------------------------
+PC-4  (cl-lf-4 swp3, VLAN 10)
+-------------------------------------------------------------------------------
+sudo ip link set eth1 up
+sudo ip addr flush dev eth1
+sudo ip addr add 10.20.10.14/24 dev eth1
+sudo ip route replace 10.20.0.0/16 via 10.20.10.254 dev eth1
+#   default route instead:  sudo ip route replace default via 10.20.10.254 dev eth1
+#   netplan: addresses [10.20.10.14/24], route 10.20.0.0/16 via 10.20.10.254
+#   nmcli:   ipv4.addresses 10.20.10.14/24 ipv4.routes "10.20.0.0/16 10.20.10.254"
+
+ip -br addr show eth1
+ping -c3 10.20.10.254                 # anycast gateway on cl-lf-4 (same IP/MAC as on cl-lf-1)
+ping -c3 10.20.10.11                  # PC-1: same VLAN, bridged across the fabric
+ping -c3 10.20.20.12                  # PC-2 (routed)
+
+===============================================================================
+TinyCore Linux PCs (GNS3 / EVE-NG / CML style lab hosts)
+===============================================================================
+TinyCore uses BusyBox tools: "ifconfig" and "route" (no netplan/nmcli), runs
+a DHCP client (udhcpc) at boot, and loses everything outside the backup list
+on reboot. The NIC is normally eth0 - check with "ifconfig -a".
+Log in as "tc" and use sudo.
+
+-------------------------------------------------------------------------------
+PC-1 (TinyCore) - cl-lf-1 swp3, VLAN 10
+-------------------------------------------------------------------------------
+# Stop the boot-time DHCP client so it doesn't replace the static address
+sudo pkill udhcpc
+
+# Address, mask and route to the fabric (gateway = anycast VRR on the leaf)
+sudo ifconfig eth0 10.20.10.11 netmask 255.255.255.0 up
+sudo route add -net  netmask 255.255.0.0 gw 10.20.10.254 dev eth0
+#   or send everything to the fabric:  sudo route add default gw 10.20.10.254 dev eth0
+
+# Verify
+ifconfig eth0                          # inet addr:10.20.10.11  Mask:255.255.255.0
+route -n                               # 10.20.0.0  10.20.10.254  255.255.0.0  eth0
+ping -c 3 10.20.10.254                 # anycast gateway on cl-lf-1
+arp -n                                 # gateway MAC 44:38:39:ff:00:01
+
+# Tests (BusyBox ping has no -M do, so no DF/MTU test here)
+ping -c 3 10.20.10.14                  # PC-4: same VLAN on cl-lf-4 (L2 VNI 10010)
+ping -c 3 10.20.20.12                  # PC-2: routed over L3 VNI 10100
+ping -c 3 10.20.30.13                  # PC-3: routed over L3 VNI 10100
+traceroute -n 10.20.20.12              # hop 1: 10.20.10.254, hop 2: PC-2
+
+# Make it persistent across reboots
+# /opt/bootlocal.sh runs as root at boot; /opt is in TinyCore's default backup.
+sudo sh -c 'cat >> /opt/bootlocal.sh <<EOF
+pkill udhcpc
+ifconfig eth0 10.20.10.11 netmask 255.255.255.0 up
+route add -net 10.20.0.0 netmask 255.255.0.0 gw 10.20.10.254 dev eth0
+EOF'
+filetool.sh -b                         # save the backup (mydata.tgz) - required!
+cat /opt/bootlocal.sh                  # check the lines were added once only
+
+-------------------------------------------------------------------------------
+PC-2 (TinyCore) - cl-lf-2 swp4, VLAN 20
+-------------------------------------------------------------------------------
+sudo pkill udhcpc
+sudo ifconfig eth0 10.20.20.12 netmask 255.255.255.0 up
+sudo route add -net 10.20.0.0 netmask 255.255.0.0 gw 10.20.20.254 dev eth0
+
+ping -c 3 10.20.20.254                 # anycast gateway on cl-lf-2
+ping -c 3 10.20.10.11                  # PC-1 (routed)
+ping -c 3 10.20.30.13                  # PC-3 (routed)
+
+sudo sh -c 'cat >> /opt/bootlocal.sh <<EOF
+pkill udhcpc
+ifconfig eth0 10.20.20.12 netmask 255.255.255.0 up
+route add -net 10.20.0.0 netmask 255.255.0.0 gw 10.20.20.254 dev eth0
+EOF'
+filetool.sh -b
+
+-------------------------------------------------------------------------------
+PC-3 (TinyCore) - cl-lf-3 swp5, VLAN 30
+-------------------------------------------------------------------------------
+sudo pkill udhcpc
+sudo ifconfig eth0 10.20.30.13 netmask 255.255.255.0 up
+sudo route add -net 10.20.0.0 netmask 255.255.0.0 gw 10.20.30.254 dev eth0
+
+ping -c 3 10.20.30.254                 # anycast gateway on cl-lf-3
+ping -c 3 10.20.10.11                  # PC-1 (routed)
+ping -c 3 10.20.20.12                  # PC-2 (routed)
+
+sudo sh -c 'cat >> /opt/bootlocal.sh <<EOF
+pkill udhcpc
+ifconfig eth0 10.20.30.13 netmask 255.255.255.0 up
+route add -net 10.20.0.0 netmask 255.255.0.0 gw 10.20.30.254 dev eth0
+EOF'
+filetool.sh -b
+
+-------------------------------------------------------------------------------
+PC-4 (TinyCore) - cl-lf-4 swp3, VLAN 10
+-------------------------------------------------------------------------------
+sudo pkill udhcpc
+sudo ifconfig eth0 10.20.10.14 netmask 255.255.255.0 up
+sudo route add -net 10.20.0.0 netmask 255.255.0.0 gw 10.20.10.254 dev eth0
+
+ping -c 3 10.20.10.254                 # anycast gateway on cl-lf-4
+ping -c 3 10.20.10.11                  # PC-1: same VLAN, bridged across the fabric
+ping -c 3 10.20.20.12                  # PC-2 (routed)
+
+sudo sh -c 'cat >> /opt/bootlocal.sh <<EOF
+pkill udhcpc
+ifconfig eth0 10.20.10.14 netmask 255.255.255.0 up
+route add -net 10.20.0.0 netmask 255.255.0.0 gw 10.20.10.254 dev eth0
+EOF'
+filetool.sh -b
+
+-------------------------------------------------------------------------------
+TinyCore - change or remove the test config
+-------------------------------------------------------------------------------
+sudo route del -net 10.20.0.0 netmask 255.255.0.0
+sudo ifconfig eth0 0.0.0.0
+sudo vi /opt/bootlocal.sh              # delete the added lines, then:
+filetool.sh -b
+
+-------------------------------------------------------------------------------
+Optional - PC on a trunk port (swp6, VLANs 10/20/30 tagged)
+-------------------------------------------------------------------------------
+# One PC with a VLAN sub-interface per tenant VLAN, e.g. on cl-lf-1:
+sudo ip link set eth1 up
+sudo ip link add link eth1 name eth1.10 type vlan id 10
+sudo ip link add link eth1 name eth1.20 type vlan id 20
+sudo ip addr add 10.20.10.21/24 dev eth1.10
+sudo ip addr add 10.20.20.21/24 dev eth1.20
+sudo ip link set eth1.10 up
+sudo ip link set eth1.20 up
+# Use network namespaces or "ping -I eth1.10" to pick the source VLAN.
+
+-------------------------------------------------------------------------------
+Remove the test config from a PC
+-------------------------------------------------------------------------------
+sudo ip route del 10.20.0.0/16
+sudo ip addr flush dev eth1

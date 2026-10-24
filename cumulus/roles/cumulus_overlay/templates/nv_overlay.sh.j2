@@ -19,15 +19,11 @@ nv set interface vlan{{ m.vlan }} ip vrr address {{ m.anycast_gw_ip }}
 nv set interface vlan{{ m.vlan }} ip vrr mac-address {{ anycast_gw_mac }}
 {% endfor %}
 
-# L3 VNI - carries routed (symmetric IRB) traffic between tenant subnets.
-# No VRR/anycast gateway here - this SVI just anchors the L3 VNI to the vrf.
-nv set bridge domain br_default vlan {{ l3vni.vlan }} vni {{ l3vni.vni }}
-nv set interface vlan{{ l3vni.vlan }} type svi
-nv set interface vlan{{ l3vni.vlan }} vlan {{ l3vni.vlan }}
-nv set interface vlan{{ l3vni.vlan }} ip vrf {{ l3vni.vrf }}
-
 # Tenant VRF - redistributes connected subnets into EVPN type-5, and ties
 # the L3 VNI to this vrf for symmetric IRB inter-subnet routing.
+# NVUE builds the L3 VNI's VLAN->VNI mapping and SVI itself from
+# "vrf <X> evpn vlan/vni" - do not also map it under "bridge domain", or
+# apply fails with "VNI <n> configured for bridge br_default already in use".
 nv set vrf {{ l3vni.vrf }} router bgp enable on
 nv set vrf {{ l3vni.vrf }} router bgp address-family ipv4-unicast enable on
 nv set vrf {{ l3vni.vrf }} router bgp address-family ipv4-unicast redistribute connected enable on

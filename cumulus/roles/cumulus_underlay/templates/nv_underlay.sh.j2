@@ -23,8 +23,13 @@ nv set vrf default router bgp neighbor {{ uplink.interface }} peer-group UNDERLA
 {% endfor %}
 {% endif %}
 
-nv set vrf default router bgp router-id {{ loopback_ip.split('/')[0] }}
-nv set vrf default router bgp autonomous-system {{ router_asn }}
+# ASN and router-id are set globally (not per vrf) so every BGP instance -
+# vrf default here and the tenant vrf from the overlay/border-leaf roles -
+# inherits them. NVUE rejects "vrf <X> router bgp enable on" when no ASN is
+# set either globally or on that vrf.
+nv set router bgp autonomous-system {{ router_asn }}
+nv set router bgp router-id {{ loopback_ip.split('/')[0] }}
+nv set router bgp enable on
 
 nv set vrf default router bgp peer-group UNDERLAY remote-as external
 nv set vrf default router bgp peer-group UNDERLAY bfd enable on
