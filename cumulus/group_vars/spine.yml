@@ -1,2 +1,13 @@
 ---
 device_role: spine
+
+# Leaf-facing ports on every spine. Listed explicitly rather than derived
+# from the sorted leaf group, because the border leafs (cl-bl-lf-*) would
+# sort ahead of cl-lf-* and shift every port number.
+downlinks:
+  - { interface: swp1, peer: cl-lf-1 }
+  - { interface: swp2, peer: cl-lf-2 }
+  - { interface: swp3, peer: cl-lf-3 }
+  - { interface: swp4, peer: cl-lf-4 }
+  - { interface: swp5, peer: cl-bl-lf-1 }
+  - { interface: swp6, peer: cl-bl-lf-2 }

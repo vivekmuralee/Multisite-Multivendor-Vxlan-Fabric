@@ -3,9 +3,16 @@ router_asn: 65016
 loopback_ip: 10.0.0.16/32
 vtep_ip: 10.0.0.16
 
-# External uplink toward the WAN/MPLS edge router
-external_uplink:
-  interface: swp3
-  description: "Uplink to MPLS-PE / WAN Edge (border leaf 2)"
-  local_ip: 192.168.101.1/30
-  peer_ip: 192.168.101.2
+# Border-gateway uplinks: one numbered /30 to each WAN/MPLS PE router
+# (PE ASNs live in wan_pe_routers, group_vars/border_leaf.yml)
+wan_uplinks:
+  - interface: swp3
+    pe: PE1
+    description: "cl-bl-lf-2 -> PE1 (WAN/MPLS edge)"
+    local_ip: 192.168.101.1/30
+    peer_ip: 192.168.101.2
+  - interface: swp4
+    pe: PE2
+    description: "cl-bl-lf-2 -> PE2 (WAN/MPLS edge)"
+    local_ip: 192.168.101.5/30
+    peer_ip: 192.168.101.6

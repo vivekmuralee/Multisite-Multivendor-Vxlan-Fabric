@@ -8,11 +8,12 @@ set -e
 nv set interface lo ip address {{ loopback_ip }}
 
 {% if 'spine' in group_names %}
-{% for leaf_host in groups['leaf'] | sort %}
-nv set interface swp{{ loop.index }} link state up
-nv set interface swp{{ loop.index }} link mtu {{ fabric_mtu }}
-nv set vrf default router bgp neighbor swp{{ loop.index }} type unnumbered
-nv set vrf default router bgp neighbor swp{{ loop.index }} peer-group UNDERLAY
+{% for downlink in downlinks %}
+# -> {{ downlink.peer }}
+nv set interface {{ downlink.interface }} link state up
+nv set interface {{ downlink.interface }} link mtu {{ fabric_mtu }}
+nv set vrf default router bgp neighbor {{ downlink.interface }} type unnumbered
+nv set vrf default router bgp neighbor {{ downlink.interface }} peer-group UNDERLAY
 {% endfor %}
 {% elif 'leaf' in group_names %}
 {% for uplink in uplinks %}

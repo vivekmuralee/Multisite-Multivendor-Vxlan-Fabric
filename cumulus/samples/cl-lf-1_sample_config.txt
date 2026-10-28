@@ -14,7 +14,7 @@ Management IP  : 192.168.122.34
 Loopback IP    : 10.0.0.11/32
 VTEP IP        : 10.0.0.11
 Router ASN     : 65011
-Fabric MTU     : 9216 (9215 on swp links)
+Fabric MTU     : 9216 (all fabric swp links)
 Uplinks        : swp1 -> cl-sp-1, swp2 -> cl-sp-2
 
 -------------------------------------------------------------------------------
@@ -52,18 +52,18 @@ Step 1 - Loopback and fabric uplinks
 nv set interface lo ip address 10.0.0.11/32
 
 # Uplinks to the spines. No IP addresses: BGP unnumbered (step 2) peers over
-# the automatic IPv6 link-local address. MTU 9215 leaves room for the 50-byte
+# the automatic IPv6 link-local address. MTU 9216 (fabric_mtu) leaves room for the 50-byte
 # VXLAN header on top of jumbo tenant frames.
 nv set interface swp1 link state up
-nv set interface swp1 link mtu 9215
+nv set interface swp1 link mtu 9216
 nv set interface swp2 link state up
-nv set interface swp2 link mtu 9215
+nv set interface swp2 link mtu 9216
 
 nv config apply -y
 
 # Verify
 nv show interface lo ip address           # 10.0.0.11/32
-nv show interface --view=brief            # swp1/swp2 up, MTU 9215
+nv show interface --view=brief            # swp1/swp2 up, MTU 9216
 nv show service lldp neighbor             # swp1 -> cl-sp-1, swp2 -> cl-sp-2
 
 -------------------------------------------------------------------------------
@@ -190,7 +190,7 @@ nv set interface vlan20 vlan 20
 nv set interface vlan20 ip vrf TENANT_A
 nv set interface vlan20 ip vrr enable on
 nv set interface vlan20 ip vrr address 10.20.20.254/24
-nv set interface vlan20 ip vrr mac-address 44:38:39:ff:00:02
+nv set interface vlan20 ip vrr mac-address 44:38:39:ff:00:01
 
 # DB - VLAN 30 / VNI 10030
 nv set bridge domain br_default vlan 30 vni 10030
@@ -199,7 +199,7 @@ nv set interface vlan30 vlan 30
 nv set interface vlan30 ip vrf TENANT_A
 nv set interface vlan30 ip vrr enable on
 nv set interface vlan30 ip vrr address 10.20.30.254/24
-nv set interface vlan30 ip vrr mac-address 44:38:39:ff:00:03
+nv set interface vlan30 ip vrr mac-address 44:38:39:ff:00:01
 
 nv config apply -y
 
@@ -279,8 +279,9 @@ nv config history | head -5
 Notes
 -------------------------------------------------------------------------------
 - cl-lf-1 is a plain leaf, so it has no external WAN peering. Border leafs
-  (cl-lf-5/cl-lf-6) add a numbered eBGP neighbor inside TENANT_A, e.g.
-  "nv set vrf TENANT_A router bgp neighbor 192.168.100.2 remote-as 65100"
+  (cl-bl-lf-1/cl-bl-lf-2) add numbered eBGP neighbors to PE1/PE2 inside
+  TENANT_A, e.g. "nv set vrf TENANT_A router bgp neighbor 192.168.100.2
+  remote-as 65101" - see samples/cl-bl-lf-1_sample_config.txt step 6
   (roles/cumulus_border_leaf/templates/nv_border_leaf.sh.j2).
 - No "advertise-all-vni" or "advertise-default-gw" commands: NVUE advertises
   every local VNI once nve vxlan and the l2vpn-evpn address family are on,

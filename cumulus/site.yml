@@ -1,6 +1,8 @@
 ---
-# Deploy a BGP EVPN VXLAN fabric across 2 spines and 6 leafs on Cumulus
-# Linux, with cl-lf-5/cl-lf-6 acting as external border leafs.
+# Deploy a BGP EVPN VXLAN fabric across 2 spines, 4 leafs and 2 border
+# leafs on Cumulus Linux. cl-bl-lf-1/cl-bl-lf-2 carry the full L2/L3 EVPN
+# overlay (they are in the leaf group too) and act as border gateways to the
+# WAN/MPLS edge routers PE1 and PE2.
 #
 # Usage:
 #   ansible-playbook site.yml
@@ -19,7 +21,7 @@
   roles:
     - cumulus_overlay
 
-- name: Configure external WAN/MPLS-edge peering (border leafs only)
+- name: Configure border gateway - VRF-lite eBGP to PE1/PE2 (border leafs only)
   hosts: border_leaf
   gather_facts: false
   roles:

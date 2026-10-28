@@ -1,3 +1,49 @@
+===============================================================================
+Hand-apply configuration guide - BORDER LEAF 1 (cl-bl-lf-1)
+===============================================================================
+Step-by-step NVUE configuration for cl-bl-lf-1, applied by hand one layer at a
+time. Each step stages "nv set" commands, applies them, then verifies the
+result before moving on. Steps 1-5 match the Ansible cumulus_underlay and
+cumulus_overlay roles, step 6 matches the cumulus_border_leaf role.
+
+Every line starting with "#" is a shell comment, so a whole step block can be
+pasted into the switch CLI as-is.
+
+Role in fabric : border leaf / border gateway - full L2 + L3 EVPN member of
+                 the fabric (same tenant VRF / VLANs / VNIs as every leaf),
+                 plus VRF-lite eBGP to both WAN/MPLS PE routers
+Management IP  : 192.168.122.38
+Loopback IP    : 10.0.0.15/32
+VTEP IP        : 10.0.0.15
+Router ASN     : 65015
+Fabric MTU     : 9216 (all fabric swp links)
+Uplinks        : swp1 -> cl-sp-1, swp2 -> cl-sp-2 (spine port swp5)
+WAN links      : swp3 -> PE1 (AS 65101), 192.168.100.1/30 <-> 192.168.100.2
+                 swp4 -> PE2 (AS 65102), 192.168.100.5/30 <-> 192.168.100.6
+                 MTU 1500 (match the PE side)
+
+Tenant design (identical to every other leaf)
+  VRF TENANT_A, L3 VNI 10100 (VLAN 100)
+  VLAN 10 / VNI 10010  WEB  10.20.10.0/24  gw 10.20.10.254
+  VLAN 20 / VNI 10020  APP  10.20.20.0/24  gw 10.20.20.254
+  VLAN 30 / VNI 10030  DB   10.20.30.0/24  gw 10.20.30.254
+
+-------------------------------------------------------------------------------
+Before you start
+-------------------------------------------------------------------------------
+# Anything staged but not applied? (should print nothing)
+nv config diff
+
+# Throw away a half-staged change if you need to start a step again
+#   nv config detach
+
+# Leftover pre-NVUE ifupdown2 fragments break ifreload - move them out:
+ls -l /etc/network/interfaces.d/
+sudo mkdir -p /root/pre-nvue-backup
+sudo mv /etc/network/interfaces.d/*.intf /root/pre-nvue-backup/ 2>/dev/null
+ls /etc/network/interfaces.d/
+ip -br link | grep -E "^vni[0-9]+"                # none expected
+
 -------------------------------------------------------------------------------
 Step 1 - Loopback and fabric uplinks
 -------------------------------------------------------------------------------
@@ -5,12 +51,12 @@ Step 1 - Loopback and fabric uplinks
 nv set interface lo ip address 10.0.0.15/32
 
 # Uplinks to the spines. No IP addresses: BGP unnumbered (step 2) peers over
-# the automatic IPv6 link-local address. MTU 9215 leaves room for the 50-byte
+# the automatic IPv6 link-local address. MTU 9216 (fabric_mtu) leaves room for the 50-byte
 # VXLAN header on top of jumbo tenant frames.
 nv set interface swp1 link state up
-nv set interface swp1 link mtu 9215
+nv set interface swp1 link mtu 9216
 nv set interface swp2 link state up
-nv set interface swp2 link mtu 9215
+nv set interface swp2 link mtu 9216
 
 nv config apply -y
 
@@ -130,7 +176,7 @@ nv set interface vlan20 vlan 20
 nv set interface vlan20 ip vrf TENANT_A
 nv set interface vlan20 ip vrr enable on
 nv set interface vlan20 ip vrr address 10.20.20.254/24
-nv set interface vlan20 ip vrr mac-address 44:38:39:ff:00:02
+nv set interface vlan20 ip vrr mac-address 44:38:39:ff:00:01
 
 # DB - VLAN 30 / VNI 10030
 nv set bridge domain br_default vlan 30 vni 10030
@@ -139,7 +185,7 @@ nv set interface vlan30 vlan 30
 nv set interface vlan30 ip vrf TENANT_A
 nv set interface vlan30 ip vrr enable on
 nv set interface vlan30 ip vrr address 10.20.30.254/24
-nv set interface vlan30 ip vrr mac-address 44:38:39:ff:00:03
+nv set interface vlan30 ip vrr mac-address 44:38:39:ff:00:01
 
 nv config apply -y
 
@@ -150,3 +196,108 @@ nv show interface vlan10 ip vrr                   # 10.20.10.254/24
 sudo vtysh -c "show bgp l2vpn evpn route type multicast"   # type-3 from all leafs
 sudo vtysh -c "show evpn vni 10010"               # remote VTEPs
 ip route show vrf TENANT_A
+
+-------------------------------------------------------------------------------
+Step 6 - Border gateway: VRF-lite eBGP to PE1 and PE2 (L3 extension to WAN)
+-------------------------------------------------------------------------------
+# swp3 (PE1) and swp4 (PE2) are routed ports in TENANT_A with numbered /30s.
+# The PEs are outside the unnumbered underlay, so these are numbered eBGP
+# sessions inside the tenant vrf. MTU 1500 matches the Cisco IOS PE side.
+
+# 6a - Route policy. Only the tenant subnets go to the WAN (no /32 host
+# routes, no WAN /30s, nothing learned from the other PE - the fabric must
+# not become a transit path between PE1 and PE2). Our own subnets are never
+# accepted back from the WAN.
+nv set router policy prefix-list TENANT_SUBNETS rule 10 match 10.20.10.0/24
+nv set router policy prefix-list TENANT_SUBNETS rule 10 action permit
+nv set router policy prefix-list TENANT_SUBNETS rule 20 match 10.20.20.0/24
+nv set router policy prefix-list TENANT_SUBNETS rule 20 action permit
+nv set router policy prefix-list TENANT_SUBNETS rule 30 match 10.20.30.0/24
+nv set router policy prefix-list TENANT_SUBNETS rule 30 action permit
+
+nv set router policy route-map WAN_OUT rule 10 match ip-prefix-list TENANT_SUBNETS
+nv set router policy route-map WAN_OUT rule 10 action permit
+
+nv set router policy route-map WAN_IN rule 10 match ip-prefix-list TENANT_SUBNETS
+nv set router policy route-map WAN_IN rule 10 action deny
+nv set router policy route-map WAN_IN rule 20 action permit
+
+# 6b - PE-facing links and eBGP sessions
+# PE1 - swp3
+nv set interface swp3 description "cl-bl-lf-1 -> PE1 (WAN/MPLS edge)"
+nv set interface swp3 link state up
+nv set interface swp3 link mtu 1500
+nv set interface swp3 ip address 192.168.100.1/30
+nv set interface swp3 ip vrf TENANT_A
+
+nv set vrf TENANT_A router bgp neighbor 192.168.100.2 type numbered
+nv set vrf TENANT_A router bgp neighbor 192.168.100.2 remote-as 65101
+nv set vrf TENANT_A router bgp neighbor 192.168.100.2 description PE1
+nv set vrf TENANT_A router bgp neighbor 192.168.100.2 bfd enable on
+nv set vrf TENANT_A router bgp neighbor 192.168.100.2 address-family ipv4-unicast enable on
+nv set vrf TENANT_A router bgp neighbor 192.168.100.2 address-family ipv4-unicast policy inbound route-map WAN_IN
+nv set vrf TENANT_A router bgp neighbor 192.168.100.2 address-family ipv4-unicast policy outbound route-map WAN_OUT
+
+# PE2 - swp4
+nv set interface swp4 description "cl-bl-lf-1 -> PE2 (WAN/MPLS edge)"
+nv set interface swp4 link state up
+nv set interface swp4 link mtu 1500
+nv set interface swp4 ip address 192.168.100.5/30
+nv set interface swp4 ip vrf TENANT_A
+
+nv set vrf TENANT_A router bgp neighbor 192.168.100.6 type numbered
+nv set vrf TENANT_A router bgp neighbor 192.168.100.6 remote-as 65102
+nv set vrf TENANT_A router bgp neighbor 192.168.100.6 description PE2
+nv set vrf TENANT_A router bgp neighbor 192.168.100.6 bfd enable on
+nv set vrf TENANT_A router bgp neighbor 192.168.100.6 address-family ipv4-unicast enable on
+nv set vrf TENANT_A router bgp neighbor 192.168.100.6 address-family ipv4-unicast policy inbound route-map WAN_IN
+nv set vrf TENANT_A router bgp neighbor 192.168.100.6 address-family ipv4-unicast policy outbound route-map WAN_OUT
+
+# 6c - Re-advertise WAN routes into EVPN as type-5 (next-hop = this VTEP),
+# so every other leaf reaches the WAN through the border leafs over the L3 VNI.
+nv set vrf TENANT_A router bgp address-family ipv4-unicast route-export to-evpn enable on
+
+# 6d - Load-share across PE1 and PE2. They are in different ASNs, so their AS
+# paths never match; aspath-ignore lets BGP install both as ECMP.
+nv set vrf TENANT_A router bgp path-selection multipath aspath-ignore on
+nv set vrf TENANT_A router bgp address-family ipv4-unicast multipaths ebgp 2
+
+nv config diff -o commands
+nv config apply -y
+
+# Verify
+nv show interface swp3                            # up, 192.168.100.1/30, vrf TENANT_A
+nv show interface swp4                            # up, 192.168.100.5/30, vrf TENANT_A
+sudo ip vrf exec TENANT_A ping -c3 192.168.100.2         # PE1
+sudo ip vrf exec TENANT_A ping -c3 192.168.100.6         # PE2
+nv show vrf TENANT_A router bgp neighbor          # 192.168.100.2 and .6 established
+sudo vtysh -c "show bgp vrf TENANT_A ipv4 unicast summary"
+sudo vtysh -c "show bfd vrf TENANT_A peers brief"
+sudo vtysh -c "show bgp vrf TENANT_A ipv4 unicast neighbors 192.168.100.2 advertised-routes"   # only 10.20.x.0/24
+sudo vtysh -c "show bgp vrf TENANT_A ipv4 unicast neighbors 192.168.100.2 routes"              # WAN prefixes
+sudo vtysh -c "show bgp vrf TENANT_A ipv4 unicast <wan-prefix>"   # 2 paths, multipath (PE1 + PE2)
+sudo vtysh -c "show bgp l2vpn evpn route type prefix"             # WAN prefixes as type-5, RD 10.0.0.15:x
+ip route show vrf TENANT_A
+
+-------------------------------------------------------------------------------
+Step 7 - Save
+-------------------------------------------------------------------------------
+nv config save
+nv config show -o commands
+nv config history | head -5
+
+-------------------------------------------------------------------------------
+Notes
+-------------------------------------------------------------------------------
+- Unlike cl-lf-1..4 there are no endpoint access ports in this sample: the
+  border leaf's outside-facing role is the WAN links in step 6. Add access
+  ports as in step 6 of cl-lf-1 if you want test hosts here too.
+- Dual border leafs: cl-bl-lf-2 runs the same step 6 with its own /30s
+  (192.168.101.0/30 to PE1, 192.168.101.4/30 to PE2). Both export the WAN routes as
+  type-5 with their own VTEP as next-hop, so cl-lf-1..4 get two ECMP paths
+  and lose nothing if one border leaf, PE or link fails.
+- PE side (Cisco IOS, per border leaf link): a VRF for the tenant on the
+  192.168.100.x/30 interface and "neighbor 192.168.100.1 remote-as 65015" (PE1) /
+  "neighbor 192.168.100.5 remote-as 65015" (PE2) under that VRF's address-family.
+- The spines peer with this box on swp5 (type unnumbered, peer-group
+  UNDERLAY) - see the cl-sp-1/cl-sp-2 samples.

@@ -3,25 +3,24 @@ Hand-apply configuration guide - BORDER LEAF 2 (cl-bl-lf-2)
 ===============================================================================
 Step-by-step NVUE configuration for cl-bl-lf-2, applied by hand one layer at a
 time. Each step stages "nv set" commands, applies them, then verifies the
-result before moving on.
+result before moving on. Steps 1-5 match the Ansible cumulus_underlay and
+cumulus_overlay roles, step 6 matches the cumulus_border_leaf role.
 
 Every line starting with "#" is a shell comment, so a whole step block can be
 pasted into the switch CLI as-is.
 
-Role in fabric : border leaf (same tenant VRF / VLANs / VNIs as the leafs,
-                 plus an external eBGP peering to the WAN / MPLS edge)
+Role in fabric : border leaf / border gateway - full L2 + L3 EVPN member of
+                 the fabric (same tenant VRF / VLANs / VNIs as every leaf),
+                 plus VRF-lite eBGP to both WAN/MPLS PE routers
 Management IP  : 192.168.122.39
 Loopback IP    : 10.0.0.16/32
 VTEP IP        : 10.0.0.16
 Router ASN     : 65016
-Fabric MTU     : 9216 (9215 on swp links)
-Uplinks        : swp1 -> cl-sp-1, swp2 -> cl-sp-2
-External link  : swp3 -> WAN/MPLS edge, 192.168.101.1/30 <-> 192.168.101.2
-                 (external ASN 65100)
-
-NOTE: values follow the cl-lf-6 host_vars (border leaf 2). If cl-bl-lf-2 is a
-different box from cl-lf-6, change the management IP, loopback/VTEP, ASN, the
-external subnet and the spine-facing swp numbers to match your cabling.
+Fabric MTU     : 9216 (all fabric swp links)
+Uplinks        : swp1 -> cl-sp-1, swp2 -> cl-sp-2 (spine port swp6)
+WAN links      : swp3 -> PE1 (AS 65101), 192.168.101.1/30 <-> 192.168.101.2
+                 swp4 -> PE2 (AS 65102), 192.168.101.5/30 <-> 192.168.101.6
+                 MTU 1500 (match the PE side)
 
 Tenant design (identical to every other leaf)
   VRF TENANT_A, L3 VNI 10100 (VLAN 100)
@@ -51,15 +50,15 @@ Step 1 - Loopback and fabric uplinks
 nv set interface lo ip address 10.0.0.16/32
 
 nv set interface swp1 link state up
-nv set interface swp1 link mtu 9215
+nv set interface swp1 link mtu 9216
 nv set interface swp2 link state up
-nv set interface swp2 link mtu 9215
+nv set interface swp2 link mtu 9216
 
 nv config apply -y
 
 # Verify
 nv show interface lo ip address           # 10.0.0.16/32
-nv show interface --view=brief            # swp1/swp2 up, MTU 9215
+nv show interface --view=brief            # swp1/swp2 up, MTU 9216
 nv show service lldp neighbor             # swp1 -> cl-sp-1, swp2 -> cl-sp-2
 
 -------------------------------------------------------------------------------
@@ -161,7 +160,7 @@ nv set interface vlan20 vlan 20
 nv set interface vlan20 ip vrf TENANT_A
 nv set interface vlan20 ip vrr enable on
 nv set interface vlan20 ip vrr address 10.20.20.254/24
-nv set interface vlan20 ip vrr mac-address 44:38:39:ff:00:02
+nv set interface vlan20 ip vrr mac-address 44:38:39:ff:00:01
 
 # DB - VLAN 30 / VNI 10030
 nv set bridge domain br_default vlan 30 vni 10030
@@ -170,7 +169,7 @@ nv set interface vlan30 vlan 30
 nv set interface vlan30 ip vrf TENANT_A
 nv set interface vlan30 ip vrr enable on
 nv set interface vlan30 ip vrr address 10.20.30.254/24
-nv set interface vlan30 ip vrr mac-address 44:38:39:ff:00:03
+nv set interface vlan30 ip vrr mac-address 44:38:39:ff:00:01
 
 nv config apply -y
 
@@ -183,37 +182,85 @@ sudo vtysh -c "show evpn vni 10010"               # remote VTEPs
 ip route show vrf TENANT_A
 
 -------------------------------------------------------------------------------
-Step 6 - External uplink and eBGP to the WAN / MPLS edge (L3 extension)
+Step 6 - Border gateway: VRF-lite eBGP to PE1 and PE2 (L3 extension to WAN)
 -------------------------------------------------------------------------------
-# swp3 is placed in TENANT_A with a numbered /30. The WAN edge is outside the
-# unnumbered underlay, so this is a numbered eBGP session inside the tenant vrf.
-nv set interface swp3 description "Uplink to MPLS-PE / WAN Edge (border leaf 2)"
+# swp3 (PE1) and swp4 (PE2) are routed ports in TENANT_A with numbered /30s.
+# The PEs are outside the unnumbered underlay, so these are numbered eBGP
+# sessions inside the tenant vrf. MTU 1500 matches the Cisco IOS PE side.
+
+# 6a - Route policy. Only the tenant subnets go to the WAN (no /32 host
+# routes, no WAN /30s, nothing learned from the other PE - the fabric must
+# not become a transit path between PE1 and PE2). Our own subnets are never
+# accepted back from the WAN.
+nv set router policy prefix-list TENANT_SUBNETS rule 10 match 10.20.10.0/24
+nv set router policy prefix-list TENANT_SUBNETS rule 10 action permit
+nv set router policy prefix-list TENANT_SUBNETS rule 20 match 10.20.20.0/24
+nv set router policy prefix-list TENANT_SUBNETS rule 20 action permit
+nv set router policy prefix-list TENANT_SUBNETS rule 30 match 10.20.30.0/24
+nv set router policy prefix-list TENANT_SUBNETS rule 30 action permit
+
+nv set router policy route-map WAN_OUT rule 10 match ip-prefix-list TENANT_SUBNETS
+nv set router policy route-map WAN_OUT rule 10 action permit
+
+nv set router policy route-map WAN_IN rule 10 match ip-prefix-list TENANT_SUBNETS
+nv set router policy route-map WAN_IN rule 10 action deny
+nv set router policy route-map WAN_IN rule 20 action permit
+
+# 6b - PE-facing links and eBGP sessions
+# PE1 - swp3
+nv set interface swp3 description "cl-bl-lf-2 -> PE1 (WAN/MPLS edge)"
 nv set interface swp3 link state up
-nv set interface swp3 link mtu 9216
+nv set interface swp3 link mtu 1500
 nv set interface swp3 ip address 192.168.101.1/30
 nv set interface swp3 ip vrf TENANT_A
 
 nv set vrf TENANT_A router bgp neighbor 192.168.101.2 type numbered
-nv set vrf TENANT_A router bgp neighbor 192.168.101.2 remote-as 65100
+nv set vrf TENANT_A router bgp neighbor 192.168.101.2 remote-as 65101
+nv set vrf TENANT_A router bgp neighbor 192.168.101.2 description PE1
+nv set vrf TENANT_A router bgp neighbor 192.168.101.2 bfd enable on
 nv set vrf TENANT_A router bgp neighbor 192.168.101.2 address-family ipv4-unicast enable on
+nv set vrf TENANT_A router bgp neighbor 192.168.101.2 address-family ipv4-unicast policy inbound route-map WAN_IN
+nv set vrf TENANT_A router bgp neighbor 192.168.101.2 address-family ipv4-unicast policy outbound route-map WAN_OUT
 
-# Optional: tighten with route-maps / prefix-lists before production use, e.g.
-# only advertise 10.20.0.0/16 to the WAN and accept a default route from it.
-#   nv set router policy prefix-list TENANT_OUT rule 10 action permit
-#   nv set router policy prefix-list TENANT_OUT rule 10 match 10.20.0.0/16 max-prefix-len 24
-#   nv set router policy route-map TO_WAN rule 10 action permit
-#   nv set router policy route-map TO_WAN rule 10 match ip-prefix-list TENANT_OUT
-#   nv set vrf TENANT_A router bgp neighbor 192.168.101.2 address-family ipv4-unicast policy outbound route-map TO_WAN
+# PE2 - swp4
+nv set interface swp4 description "cl-bl-lf-2 -> PE2 (WAN/MPLS edge)"
+nv set interface swp4 link state up
+nv set interface swp4 link mtu 1500
+nv set interface swp4 ip address 192.168.101.5/30
+nv set interface swp4 ip vrf TENANT_A
 
+nv set vrf TENANT_A router bgp neighbor 192.168.101.6 type numbered
+nv set vrf TENANT_A router bgp neighbor 192.168.101.6 remote-as 65102
+nv set vrf TENANT_A router bgp neighbor 192.168.101.6 description PE2
+nv set vrf TENANT_A router bgp neighbor 192.168.101.6 bfd enable on
+nv set vrf TENANT_A router bgp neighbor 192.168.101.6 address-family ipv4-unicast enable on
+nv set vrf TENANT_A router bgp neighbor 192.168.101.6 address-family ipv4-unicast policy inbound route-map WAN_IN
+nv set vrf TENANT_A router bgp neighbor 192.168.101.6 address-family ipv4-unicast policy outbound route-map WAN_OUT
+
+# 6c - Re-advertise WAN routes into EVPN as type-5 (next-hop = this VTEP),
+# so every other leaf reaches the WAN through the border leafs over the L3 VNI.
+nv set vrf TENANT_A router bgp address-family ipv4-unicast route-export to-evpn enable on
+
+# 6d - Load-share across PE1 and PE2. They are in different ASNs, so their AS
+# paths never match; aspath-ignore lets BGP install both as ECMP.
+nv set vrf TENANT_A router bgp path-selection multipath aspath-ignore on
+nv set vrf TENANT_A router bgp address-family ipv4-unicast multipaths ebgp 2
+
+nv config diff -o commands
 nv config apply -y
 
 # Verify
 nv show interface swp3                            # up, 192.168.101.1/30, vrf TENANT_A
-ping -c3 -I TENANT_A 192.168.101.2                # (or: ip vrf exec TENANT_A ping ...)
-nv show vrf TENANT_A router bgp neighbor          # 192.168.101.2 established
+nv show interface swp4                            # up, 192.168.101.5/30, vrf TENANT_A
+sudo ip vrf exec TENANT_A ping -c3 192.168.101.2         # PE1
+sudo ip vrf exec TENANT_A ping -c3 192.168.101.6         # PE2
+nv show vrf TENANT_A router bgp neighbor          # 192.168.101.2 and .6 established
 sudo vtysh -c "show bgp vrf TENANT_A ipv4 unicast summary"
-sudo vtysh -c "show bgp vrf TENANT_A ipv4 unicast"    # WAN prefixes + tenant /24s
-sudo vtysh -c "show bgp l2vpn evpn route type prefix" # type-5 for WAN routes
+sudo vtysh -c "show bfd vrf TENANT_A peers brief"
+sudo vtysh -c "show bgp vrf TENANT_A ipv4 unicast neighbors 192.168.101.2 advertised-routes"   # only 10.20.x.0/24
+sudo vtysh -c "show bgp vrf TENANT_A ipv4 unicast neighbors 192.168.101.2 routes"              # WAN prefixes
+sudo vtysh -c "show bgp vrf TENANT_A ipv4 unicast <wan-prefix>"   # 2 paths, multipath (PE1 + PE2)
+sudo vtysh -c "show bgp l2vpn evpn route type prefix"             # WAN prefixes as type-5, RD 10.0.0.16:x
 ip route show vrf TENANT_A
 
 -------------------------------------------------------------------------------
@@ -227,12 +274,14 @@ nv config history | head -5
 Notes
 -------------------------------------------------------------------------------
 - Unlike cl-lf-1..4 there are no endpoint access ports in this sample: the
-  border leaf's host-facing role is the WAN link in step 6. Add access ports
-  as in step 6 of cl-lf-1 if you want test hosts here too.
-- Dual border leafs: cl-bl-lf-1 should use its own /30 (e.g. 192.168.100.0/30)
-  and ASN/loopback. Both advertise external routes as type-5 with their own
-  VTEP as next-hop, so other leafs get two ECMP paths.
-- Both border leafs and the WAN edge should be in different ASNs from each
-  other; if both WAN edge routers share an ASN, no extra config is needed.
-- The spines need a downlink neighbor for this box (swpN type unnumbered in
-  peer-group UNDERLAY) - see the cl-sp-1/cl-sp-2 samples.
+  border leaf's outside-facing role is the WAN links in step 6. Add access
+  ports as in step 6 of cl-lf-1 if you want test hosts here too.
+- Dual border leafs: cl-bl-lf-1 runs the same step 6 with its own /30s
+  (192.168.100.0/30 to PE1, 192.168.100.4/30 to PE2). Both export the WAN routes as
+  type-5 with their own VTEP as next-hop, so cl-lf-1..4 get two ECMP paths
+  and lose nothing if one border leaf, PE or link fails.
+- PE side (Cisco IOS, per border leaf link): a VRF for the tenant on the
+  192.168.101.x/30 interface and "neighbor 192.168.101.1 remote-as 65016" (PE1) /
+  "neighbor 192.168.101.5 remote-as 65016" (PE2) under that VRF's address-family.
+- The spines peer with this box on swp6 (type unnumbered, peer-group
+  UNDERLAY) - see the cl-sp-1/cl-sp-2 samples.

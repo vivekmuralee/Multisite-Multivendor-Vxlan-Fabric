@@ -1,7 +1,7 @@
 # Cumulus Linux EVPN-VXLAN Fabric - Verification & Validation Runbook
 
-Operational runbook for the 2-spine / 6-leaf fabric built by this repo
-(`cl-sp-1/2`, `cl-lf-1..6`; `cl-lf-5/6` are border leafs). Commands are
+Operational runbook for the 2-spine / 4-leaf / 2-border-leaf fabric built by
+this repo (`cl-sp-1/2`, `cl-lf-1..4`, border leafs `cl-bl-lf-1/2`). Commands are
 Cumulus Linux 5.x (NVUE `nv show` plus FRR `vtysh` / Linux tools where NVUE has
 no equivalent). Run them on the switch unless stated.
 
@@ -10,14 +10,14 @@ no equivalent). Run them on the switch unless stated.
 | Item | Value |
 |---|---|
 | Spine loopbacks / ASN | cl-sp-1 `10.0.0.1` / 65001, cl-sp-2 `10.0.0.2` / 65002 |
-| Leaf loopbacks (= VTEP IP) / ASN | cl-lf-N `10.0.0.1N` / `6501N` (lf-1 = 10.0.0.11 / 65011 ... lf-6 = 10.0.0.16 / 65016) |
-| Mgmt IPs | sp-1 .32, sp-2 .33, lf-1 .34 ... lf-6 .39 (192.168.122.0/24) |
+| Leaf loopbacks (= VTEP IP) / ASN | cl-lf-N `10.0.0.1N` / `6501N` (lf-1 = 10.0.0.11 / 65011 ... lf-4 = 10.0.0.14 / 65014); cl-bl-lf-1 `10.0.0.15` / 65015, cl-bl-lf-2 `10.0.0.16` / 65016 |
+| Mgmt IPs | sp-1 .32, sp-2 .33, lf-1 .34 ... lf-4 .37, bl-lf-1 .38, bl-lf-2 .39 (192.168.122.0/24) |
 | Underlay | eBGP unnumbered on swp1 (to sp-1) and swp2 (to sp-2) on leafs, peer-group `UNDERLAY`, BFD on |
 | Tenant VRF | `TENANT_A`, L3 VNI `10100` (VLAN 100) |
 | L2 VNIs | VLAN 10 / VNI 10010 (10.20.10.0/24), VLAN 20 / 10020 (10.20.20.0/24), VLAN 30 / 10030 (10.20.30.0/24) |
-| Anycast GW | `.254` in each subnet, VRR MACs `44:38:39:ff:00:01..03` |
-| MTU | 9216 fabric, 9215 on swp links |
-| Border leafs | cl-lf-5 / cl-lf-6 `swp3` -> WAN/MPLS edge (AS 65100), peer `192.168.100.2` on lf-5 (check `host_vars` for lf-6) |
+| Anycast GW | `.254` in each subnet, one shared VRR MAC `44:38:39:ff:00:01` on every SVI |
+| MTU | 9216 on fabric swp links (fabric_mtu), 1500 on border-leaf WAN links |
+| Border leafs | VRF-lite eBGP in `TENANT_A`: `swp3` -> PE1 (AS 65101), `swp4` -> PE2 (AS 65102). cl-bl-lf-1 peers `192.168.100.2` / `.6`, cl-bl-lf-2 peers `192.168.101.2` / `.6`. MTU 1500 on WAN links |
 
 Set these once in your shell to paste commands as-is:
 
@@ -52,7 +52,7 @@ nv show interface lo ip address
 ip -br link                             # Linux view
 ip -br addr
 sudo ethtool swp1 | grep -E "Speed|Duplex|Link detected"
-nv show interface swp1 link mtu         # expect 9215 on fabric links
+nv show interface swp1 link mtu         # expect 9216 on fabric links
 ```
 
 Neighbor cabling check with LLDP (confirms swp1 -> sp-1, swp2 -> sp-2):
@@ -65,7 +65,7 @@ nv show service lldp neighbor
 |---|---|
 | `oper-status down`, `admin up` | Cable/peer port down or wrong port; check LLDP, peer side |
 | Incrementing `in-errors` / `drops` | Bad optic/cable, MTU mismatch; `nv show interface swpX link stats` twice, 10s apart |
-| MTU mismatch between ends | Fabric uses 9215 on swp; BGP may establish but large EVPN updates/data stall. Compare both ends |
+| MTU mismatch between ends | Fabric uses 9216 on swp; BGP may establish but large EVPN updates/data stall. Compare both ends |
 | Port flaps | `sudo journalctl -u switchd --since "-30 min"` |
 
 ## 3. Underlay BGP (loopback reachability)
@@ -292,7 +292,7 @@ sudo vtysh -c "show evpn mac vni 10010 mac aa:bb:cc:dd:ee:ff"   # detail, seq nu
 
 | MAC | What |
 |---|---|
-| `44:38:39:ff:00:01..03` | Anycast gateway VRR MACs, local on every leaf by design |
+| `44:38:39:ff:00:01` | Anycast gateway VRR MAC (shared by every SVI), local on every leaf by design |
 | RMAC of a VTEP (`nv show vrf TENANT_A evpn`) | Router MAC used on L3VNI routed traffic |
 | `00:00:00:00:00:00` | Head-end-replication flood entry, not a host |
 
@@ -359,12 +359,15 @@ SVI test the control plane but not the exact host path.
 ### 8.4 To the external network (border leafs and beyond)
 
 ```bash
-# On border leaf (cl-lf-5): the eBGP session in the tenant VRF
-nv show vrf $VRF router bgp neighbor 192.168.100.2
+# On border leaf (cl-bl-lf-1): eBGP sessions to PE1 (.2) and PE2 (.6) in the tenant VRF
+nv show vrf $VRF router bgp neighbor              # 192.168.100.2 and .6 Established
 sudo vtysh -c "show bgp vrf $VRF summary"
-sudo vtysh -c "show bgp vrf $VRF ipv4 unicast neighbors 192.168.100.2 advertised-routes"
-sudo vtysh -c "show bgp vrf $VRF ipv4 unicast neighbors 192.168.100.2 routes"
+sudo vtysh -c "show bfd vrf $VRF peers brief"
+sudo vtysh -c "show bgp vrf $VRF ipv4 unicast neighbors 192.168.100.2 advertised-routes"   # tenant /24s only
+sudo vtysh -c "show bgp vrf $VRF ipv4 unicast neighbors 192.168.100.2 routes"              # WAN prefixes
+sudo vtysh -c "show bgp vrf $VRF ipv4 unicast <external-prefix>"   # 2 paths (PE1 + PE2), multipath
 sudo ip vrf exec $VRF ping -c3 192.168.100.2
+sudo ip vrf exec $VRF ping -c3 192.168.100.6
 sudo ip vrf exec $VRF ping -c3 -I vlan10 <external-prefix-host>
 sudo ip vrf exec $VRF traceroute -n -s 10.20.10.254 <external-ip>
 
@@ -374,11 +377,12 @@ sudo ip vrf exec $VRF traceroute -n -s 10.20.10.254 <external-ip>
 ```
 
 Expected from lf-1 toward external: next-hop = border leaf RMAC/VTEP (10.0.0.15
-and/or 10.0.0.16), first visible hop is the border leaf VRF address, then the WAN edge
-(192.168.100.2 or the lf-6 equivalent), then the WAN.
+and/or 10.0.0.16), first visible hop is the border leaf VRF address, then PE1 or PE2
+(192.168.100.2/.6 via cl-bl-lf-1, 192.168.101.2/.6 via cl-bl-lf-2), then the WAN.
 
-Reverse direction: from the external router confirm it received the fabric subnets
-(10.20.10.0/24 ... 10.20.30.0/24) from AS 65015/65016 and can reach the tenant gateway.
+Reverse direction: on PE1 and PE2 confirm each received the fabric subnets
+(10.20.10.0/24 ... 10.20.30.0/24) from both AS 65015 and AS 65016 - and nothing
+else (no /32 host routes, no routes from the other PE) - and can reach the tenant gateway.
 
 ### 8.5 Packet capture (last resort)
 
@@ -471,7 +475,7 @@ Print/paste into the change ticket. Mark each as PASS/FAIL.
 
 | # | Check | Command | Expected |
 |---|---|---|---|
-| 1 | Interfaces up | `nv show interface --view=brief` | swp links up, MTU 9215 |
+| 1 | Interfaces up | `nv show interface --view=brief` | swp links up, MTU 9216 |
 | 2 | LLDP topology | `nv show service lldp neighbor` | matches cabling |
 | 3 | Underlay BGP | `nv show vrf default router bgp neighbor` | all Established (leaf 2, spine 6) |
 | 4 | BFD | `vtysh -c "show bfd peers brief"` | all up |
@@ -485,7 +489,7 @@ Print/paste into the change ticket. Mark each as PASS/FAIL.
 | 12 | L3 VNI | `vtysh -c "show vrf vni"` | TENANT_A 10100 Up; RMACs present |
 | 13 | Anycast GW | `nv show interface vlan10 ip vrr` | same IP/MAC on all leafs |
 | 14 | Inter-subnet ping | `ip vrf exec TENANT_A ping ...` | success across leafs |
-| 15 | External BGP (lf-5/6) | `show bgp vrf TENANT_A summary` | WAN peer Established |
+| 15 | External BGP (bl-lf-1/2) | `show bgp vrf TENANT_A summary` | PE1 and PE2 Established |
 | 16 | External reachability | `ip vrf exec TENANT_A traceroute ...` | via border leaf to WAN |
 | 17 | Logs clean | `journalctl -u frr --since "-15 min"` | no flaps / errors |
 | 18 | Config saved | `nv config history \| head` | latest applied revision is expected one |
@@ -523,7 +527,7 @@ nv config show -o commands | grep -E "nve|bridge domain"               # VXLAN /
 nv config show -o commands | grep -E "interface vlan(10|20|30|100) "   # SVIs + VRR
 nv config show -o commands | grep "vrf TENANT_A"                       # tenant VRF, L3VNI, ext BGP
 nv config show -o commands | grep -E "evpn"                            # EVPN settings
-nv config show -o commands | grep "192.168.100"                        # border-leaf WAN peering (lf-5/6)
+nv config show -o commands | grep -E "192.168.10[01]|WAN_|TENANT_SUBNETS"   # border-leaf WAN peering + policy
 ```
 
 Applied value of a single object without the full dump:

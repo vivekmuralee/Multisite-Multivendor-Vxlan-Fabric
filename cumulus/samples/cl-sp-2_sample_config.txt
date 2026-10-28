@@ -13,8 +13,8 @@ Role in fabric : spine
 Management IP  : 192.168.122.33
 Loopback IP    : 10.0.0.2/32
 Router ASN     : 65002
-Fabric MTU     : 9216 (9215 on swp links)
-Downlinks      : swp1 -> cl-lf-1 ... swp6 -> cl-lf-6
+Fabric MTU     : 9216 (all fabric swp links)
+Downlinks      : swp1 -> cl-lf-1 ... swp4 -> cl-lf-4, swp5 -> cl-bl-lf-1, swp6 -> cl-bl-lf-2
 
 -------------------------------------------------------------------------------
 Before you start
@@ -47,26 +47,26 @@ Step 1 - Loopback and leaf-facing ports
 nv set interface lo ip address 10.0.0.2/32
 
 # One port per leaf. No IP addresses: BGP unnumbered (step 2) peers over the
-# automatic IPv6 link-local address. MTU 9215 carries VXLAN-encapsulated
+# automatic IPv6 link-local address. MTU 9216 (fabric_mtu) carries VXLAN-encapsulated
 # jumbo frames.
 nv set interface swp1 link state up
-nv set interface swp1 link mtu 9215
+nv set interface swp1 link mtu 9216
 nv set interface swp2 link state up
-nv set interface swp2 link mtu 9215
+nv set interface swp2 link mtu 9216
 nv set interface swp3 link state up
-nv set interface swp3 link mtu 9215
+nv set interface swp3 link mtu 9216
 nv set interface swp4 link state up
-nv set interface swp4 link mtu 9215
+nv set interface swp4 link mtu 9216
 nv set interface swp5 link state up
-nv set interface swp5 link mtu 9215
+nv set interface swp5 link mtu 9216
 nv set interface swp6 link state up
-nv set interface swp6 link mtu 9215
+nv set interface swp6 link mtu 9216
 
 nv config apply -y
 
 # Verify
 nv show interface lo ip address           # 10.0.0.2/32
-nv show interface --view=brief            # swp1-swp6 up, MTU 9215
+nv show interface --view=brief            # swp1-swp6 up, MTU 9216
 nv show service lldp neighbor             # swpN -> cl-lf-N
 
 -------------------------------------------------------------------------------
