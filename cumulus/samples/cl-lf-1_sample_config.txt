@@ -147,6 +147,13 @@ nv set vrf TENANT_A router bgp address-family ipv4-unicast enable on
 nv set vrf TENANT_A router bgp address-family ipv4-unicast redistribute connected enable on
 nv set vrf TENANT_A router bgp address-family l2vpn-evpn enable on
 
+# 4c-2 - ECMP inside the vrf. The WAN default route arrives as type-5 from
+# both border leafs (and on a border leaf from both PEs), each from a
+# different ASN - the AS paths never match, so BGP needs aspath-ignore to
+# install both.
+nv set vrf TENANT_A router bgp path-selection multipath aspath-ignore on
+nv set vrf TENANT_A router bgp address-family ipv4-unicast multipaths ebgp 2
+
 # 4d - Bind the L3 VNI to the vrf. NVUE creates the VLAN 100 -> VNI 10100 mapping
 # and the vlan100 SVI (no IP, in TENANT_A) by itself from these lines. Do NOT
 # also add "nv set bridge domain br_default vlan 100 vni 10100" or an

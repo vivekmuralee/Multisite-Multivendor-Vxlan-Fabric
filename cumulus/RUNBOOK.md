@@ -16,8 +16,8 @@ no equivalent). Run them on the switch unless stated.
 | Tenant VRF | `TENANT_A`, L3 VNI `10100` (VLAN 100) |
 | L2 VNIs | VLAN 10 / VNI 10010 (10.20.10.0/24), VLAN 20 / 10020 (10.20.20.0/24), VLAN 30 / 10030 (10.20.30.0/24) |
 | Anycast GW | `.254` in each subnet, one shared VRR MAC `44:38:39:ff:00:01` on every SVI |
-| MTU | 9216 on fabric swp links (fabric_mtu), 1500 on border-leaf WAN links |
-| Border leafs | VRF-lite eBGP in `TENANT_A`: `swp3` -> PE1 (AS 65101), `swp4` -> PE2 (AS 65102). cl-bl-lf-1 peers `192.168.100.2` / `.6`, cl-bl-lf-2 peers `192.168.101.2` / `.6`. MTU 1500 on WAN links |
+| MTU | 9216 on all swp links, fabric and border-leaf WAN links (fabric_mtu) |
+| Border leafs | VRF-lite eBGP in `TENANT_A`: `swp3` -> PE1 (AS 65101), `swp4` -> PE2 (AS 65102). cl-bl-lf-1 peers `192.168.100.2` / `.6`, cl-bl-lf-2 peers `192.168.101.2` / `.6`. MTU 9216 on WAN links (PE side must match) |
 
 Set these once in your shell to paste commands as-is:
 
@@ -249,9 +249,10 @@ nv show vrf $VRF router bgp address-family ipv4-unicast route
 nv show vrf $VRF router rib ipv4 route
 ```
 
-On non-border leafs a default or external prefix (for example from the WAN edge)
-should appear as type-5 with next-hop = border leaf VTEP (10.0.0.15 / 10.0.0.16),
-two paths if both border leafs advertise it.
+On non-border leafs the WAN default route (0.0.0.0/0) should appear as type-5
+from both border leafs (next-hop VTEP 10.0.0.15 and 10.0.0.16) and be installed
+as ECMP: `ip route show vrf $VRF default` lists two nexthops. One nexthop only =
+check `multipath aspath-ignore` / `multipaths ebgp` in the vrf.
 
 ## 6. Locating a device by MAC address (narrowing down)
 
@@ -363,26 +364,27 @@ SVI test the control plane but not the exact host path.
 nv show vrf $VRF router bgp neighbor              # 192.168.100.2 and .6 Established
 sudo vtysh -c "show bgp vrf $VRF summary"
 sudo vtysh -c "show bfd vrf $VRF peers brief"
-sudo vtysh -c "show bgp vrf $VRF ipv4 unicast neighbors 192.168.100.2 advertised-routes"   # tenant /24s only
-sudo vtysh -c "show bgp vrf $VRF ipv4 unicast neighbors 192.168.100.2 routes"              # WAN prefixes
-sudo vtysh -c "show bgp vrf $VRF ipv4 unicast <external-prefix>"   # 2 paths (PE1 + PE2), multipath
+sudo vtysh -c "show bgp vrf $VRF ipv4 unicast neighbors 192.168.100.2 routes"              # 0.0.0.0/0 only
+sudo vtysh -c "show bgp vrf $VRF ipv4 unicast neighbors 192.168.100.2 advertised-routes"   # 10.20.0.0/16 only
+sudo vtysh -c "show bgp vrf $VRF ipv4 unicast 0.0.0.0/0"     # 2 paths (PE1 + PE2), both multipath
+ip route show vrf $VRF default                               # 2 nexthops: swp3 and swp4
 sudo ip vrf exec $VRF ping -c3 192.168.100.2
 sudo ip vrf exec $VRF ping -c3 192.168.100.6
-sudo ip vrf exec $VRF ping -c3 -I vlan10 <external-prefix-host>
+sudo ip vrf exec $VRF ping -c3 -M do -s 9188 192.168.100.2   # jumbo (9216 MTU) path to PE1, DF set
 sudo ip vrf exec $VRF traceroute -n -s 10.20.10.254 <external-ip>
 
-# On a normal leaf (cl-lf-1): external reachable through border VTEP
-nv show vrf $VRF router rib ipv4 route <external-prefix>
+# On a normal leaf (cl-lf-1): default route via both border leafs
+ip route show vrf $VRF default                               # 2 nexthops: 10.0.0.15 and 10.0.0.16
 sudo ip vrf exec $VRF traceroute -n -s 10.20.10.254 <external-ip>
 ```
 
 Expected from lf-1 toward external: next-hop = border leaf RMAC/VTEP (10.0.0.15
-and/or 10.0.0.16), first visible hop is the border leaf VRF address, then PE1 or PE2
+and 10.0.0.16, ECMP per flow), first visible hop is the border leaf VRF address, then PE1 or PE2
 (192.168.100.2/.6 via cl-bl-lf-1, 192.168.101.2/.6 via cl-bl-lf-2), then the WAN.
 
-Reverse direction: on PE1 and PE2 confirm each received the fabric subnets
-(10.20.10.0/24 ... 10.20.30.0/24) from both AS 65015 and AS 65016 - and nothing
-else (no /32 host routes, no routes from the other PE) - and can reach the tenant gateway.
+Reverse direction: on PE1 and PE2 confirm each received 10.20.0.0/16 from both
+AS 65015 and AS 65016 - and nothing else (no /24s, no /32 host routes) - and
+installed both as multipath (`show ip bgp vpnv4 vrf TENANT_A 10.20.0.0`).
 
 ### 8.5 Packet capture (last resort)
 
@@ -431,7 +433,7 @@ Host A cannot reach Host B
 +-- External?
       +-- Border leaf eBGP to WAN Established?              no -> 8.4
       +-- Default/prefix received and exported as type-5?   no -> 5.5
-      +-- Return route on WAN edge for 10.20.x.0/24?        no -> 8.4 (advertised-routes)
+      +-- Return route on WAN edge for 10.20.0.0/16?        no -> 8.4 (advertised-routes)
 ```
 
 Common faults:

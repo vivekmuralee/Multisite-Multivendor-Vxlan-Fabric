@@ -30,6 +30,10 @@ vni_mappings:
     subnet: 10.20.30.0/24
     anycast_gw_ip: 10.20.30.254/24
 
+# Summary of every vni_mappings subnet - the only tenant prefix the border
+# leafs advertise to the WAN PEs. Keep new tenant subnets inside it.
+tenant_summary: 10.20.0.0/16
+
 # L3 VNI used for symmetric IRB / inter-subnet routing within the tenant VRF.
 l3vni:
   vlan: 100

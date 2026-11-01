@@ -13,6 +13,8 @@ wan_pe_routers:
   PE2:
     asn: 65102
 
-# MTU on the PE-facing links - must match the PE side (Cisco IOS defaults to
-# 1500), not the fabric's jumbo MTU, or large packets get dropped at the PE.
-wan_mtu: 1500
+# MTU on the PE-facing links. Jumbo, same as the fabric, so the WAN can
+# carry full-size frames between the Cumulus and Arista sites (multi-site
+# fabric). The PE interfaces must be set to the same MTU - a mismatch lets
+# BGP come up but silently drops large packets.
+wan_mtu: "{{ fabric_mtu }}"

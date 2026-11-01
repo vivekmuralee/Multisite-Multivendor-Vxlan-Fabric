@@ -28,6 +28,14 @@ nv set vrf {{ l3vni.vrf }} router bgp enable on
 nv set vrf {{ l3vni.vrf }} router bgp address-family ipv4-unicast enable on
 nv set vrf {{ l3vni.vrf }} router bgp address-family ipv4-unicast redistribute connected enable on
 nv set vrf {{ l3vni.vrf }} router bgp address-family l2vpn-evpn enable on
+
+# ECMP inside the tenant vrf. External routes (the WAN default route) arrive
+# as type-5 from both border leafs, and on a border leaf from both PEs - each
+# from a different ASN, so the AS paths never match and BGP would pick one
+# without aspath-ignore.
+nv set vrf {{ l3vni.vrf }} router bgp path-selection multipath aspath-ignore on
+nv set vrf {{ l3vni.vrf }} router bgp address-family ipv4-unicast multipaths ebgp {{ bgp_ecmp }}
+
 nv set vrf {{ l3vni.vrf }} evpn enable on
 nv set vrf {{ l3vni.vrf }} evpn vlan {{ l3vni.vlan }}
 nv set vrf {{ l3vni.vrf }} evpn vni {{ l3vni.vni }}

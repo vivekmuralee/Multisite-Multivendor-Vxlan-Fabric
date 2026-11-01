@@ -42,11 +42,15 @@ Phase-2/3 of the top-level README).
   they get the same spine uplinks, VNIs, anycast gateways and L3 VNI as
   every leaf. On top of that (`cumulus_border_leaf` role) each one runs a
   numbered eBGP session to both PE1 and PE2 inside the tenant VRF
-  (VRF-lite, BFD on), advertises only the tenant subnets to the WAN,
-  refuses them back, and re-exports the WAN routes into EVPN as type-5 so
-  every leaf has two ECMP paths out (one per border leaf). PE1 and PE2 are
-  in different ASNs, so `multipath aspath-ignore` is set to load-share
-  across both.
+  (VRF-lite, BFD on, MTU 9216). Policy: accept **only the default route**
+  from the PEs (`WAN_IN`), advertise **only the tenant summary**
+  `tenant_summary` (10.20.0.0/16, an aggregate of the tenant /24s) to them
+  (`WAN_OUT`), and re-export the default route into EVPN as type-5.
+* ECMP end to end: each border leaf load-shares the default route across
+  PE1 + PE2, every leaf load-shares it across both border leafs (via the
+  vrf `multipath aspath-ignore` + `multipaths ebgp` set by the overlay role
+  - needed because every path comes from a different ASN), and each PE
+  load-shares 10.20.0.0/16 across both border leafs (PE-side config below).
 
 ## Addressing / numbering scheme
 
@@ -68,7 +72,8 @@ Cabling convention: every leaf and border leaf's `swp1` goes to `cl-sp-1`,
 `swp5`/`swp6` go to cl-bl-lf-1/cl-bl-lf-2 (`downlinks` in
 `group_vars/spine.yml` - edit that if your GNS3 wiring differs). Border
 leafs use `swp3` to PE1 and `swp4` to PE2 (`wan_uplinks` in their
-`host_vars`), MTU 1500 to match the PEs.
+`host_vars`), MTU 9216 like the fabric, for the multi-site Cumulus <->
+Arista path - set the PE interfaces to match.
 
 Tenant overlay (`group_vars/all/vars.yml`):
 
@@ -131,17 +136,18 @@ ansible-playbook site.yml --check --diff  # dry run
 Update these (or swap in DNS names) if your GNS3 topology differs, and set
 `remote_user`/SSH key in `ansible.cfg` as needed.
 
-The PE side is not configured by this repo. Each PE needs the tenant VRF on
-its border-leaf-facing /30s and an eBGP neighbor per border leaf, e.g. on
-PE1: `neighbor 192.168.100.1 remote-as 65015` and
-`neighbor 192.168.101.1 remote-as 65016` in that VRF's IPv4 address family.
+The PE side is not configured by this repo. Each PE needs, in the tenant
+VRF: `mtu 9216` and BFD on its border-leaf-facing /30s, an eBGP neighbor per
+border leaf with `default-originate`, and `maximum-paths 2` plus
+`bgp bestpath as-path multipath-relax` so it load-shares 10.20.0.0/16
+across AS 65015 and AS 65016. A full Cisco IOS example for PE1 is in the
+Notes of `samples/cl-bl-lf-1_sample_config.txt`.
 
 ## Before using this beyond a lab
 
-* The border-leaf route policy (`WAN_OUT` / `WAN_IN` in
-  `roles/cumulus_border_leaf/templates/nv_border_leaf.sh.j2`) only filters
-  on the tenant subnets. Narrow `WAN_IN` to the prefixes you actually expect
-  (or a default route) and add maximum-prefix limits.
+* Add maximum-prefix limits on the PE sessions, and keep any new tenant
+  subnet inside `tenant_summary` (`group_vars/all/vars.yml`) - anything
+  outside it is never advertised to the WAN.
 * Add MD5/BFD authentication as required by your security policy.
 * If leafs need dual-attached host redundancy, layer in MLAG (peerlink +
   `clagd-vxlan-anycast-ip`) - intentionally left out here to keep the
