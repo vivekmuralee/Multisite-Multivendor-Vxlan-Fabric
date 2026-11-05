@@ -14,7 +14,3 @@ interface Management1
 ip routing
 !
 ip route vrf {{ mgmt_vrf }} 0.0.0.0/0 {{ mgmt_gateway }}
-!
-{% for server in ntp_servers %}
-ntp server vrf {{ mgmt_vrf }} {{ server }}
-{% endfor %}

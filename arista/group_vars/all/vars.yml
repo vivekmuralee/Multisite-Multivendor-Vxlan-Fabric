@@ -23,6 +23,7 @@ timezone: US/Pacific
 # 8.8.8.8 is Google DNS, not NTP. 216.239.35.0 is time.google.com.
 ntp_servers:
   - 216.239.35.0
+  - 216.40.34.37
 
 fabric_mtu: 9214
 

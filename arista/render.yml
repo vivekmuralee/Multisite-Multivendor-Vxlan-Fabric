@@ -24,6 +24,7 @@
         mode: "0644"
       loop:
         - { role: arista_base, template: base.j2, file: 10-base.cfg }
+        - { role: arista_base, template: ntp.j2, file: 11-ntp.cfg }
         - { role: arista_underlay, template: underlay.j2, file: 20-underlay.cfg }
       delegate_to: localhost
 

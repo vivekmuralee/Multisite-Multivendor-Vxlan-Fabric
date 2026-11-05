@@ -9,30 +9,33 @@
 #   ansible-playbook site.yml
 #   ansible-playbook site.yml --limit spine          # underlay only, spines
 #   ansible-playbook site.yml --tags cleanup         # one-off stale-config removal
+#
+# Run one section only with its tag: base, ntp, underlay, overlay, border
+#   ansible-playbook site.yml --tags ntp --limit leaf
 
 - name: Configure base - hostname, management, NTP (all fabric switches)
   hosts: fabric
   gather_facts: false
   roles:
-    - arista_base
+    - { role: arista_base, tags: [base] }
 
 - name: Configure BGP underlay + EVPN control plane (all fabric switches)
   hosts: fabric
   gather_facts: false
   roles:
-    - arista_underlay
+    - { role: arista_underlay, tags: [underlay] }
 
 - name: Configure VXLAN overlay - VLANs, VNIs, anycast gateways, VRF (leafs only)
   hosts: leaf
   gather_facts: false
   roles:
-    - arista_overlay
+    - { role: arista_overlay, tags: [overlay] }
 
 - name: Configure border gateway - VRF-lite eBGP to the WAN (border leafs only)
   hosts: border_leaf
   gather_facts: false
   roles:
-    - arista_border_leaf
+    - { role: arista_border_leaf, tags: [border] }
 
 # eos_config only adds lines, so config the templates no longer render has
 # to be removed with explicit "no" commands (eos_cleanup_* in group_vars /
