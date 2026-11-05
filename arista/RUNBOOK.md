@@ -19,16 +19,16 @@ stated.
 | Underlay | eBGP on routed point-to-point links `Ethernet1` (to sp-1) and `Ethernet2` (to sp-2), BFD on |
 | Overlay | eBGP multihop l2vpn-evpn between leaf Loopback0 and spine Loopback0, `send-community extended` |
 | VXLAN interface | `Vxlan1`, source `Loopback0`, UDP 4789 |
-| Tenant VRF | `TENANT_A`, L3 VNI `10100` (VLAN 100) |
+| Tenant VRF | `PROD`, L3 VNI `10100` (VLAN 100) |
 | L2 VNIs | VLAN 10 / VNI 10010 (10.20.10.0/24), VLAN 20 / 10020 (10.20.20.0/24), VLAN 30 / 10030 (10.20.30.0/24) |
 | Anycast GW | `.254` in each subnet via `ip address virtual`, `ip virtual-router mac-address 0044.3839.ff00` |
 | MTU | 9214 on fabric links (EOS maximum), 9214 on the SVIs you route over |
-| Border leafs | `ar-lf-5` / `ar-lf-6` -> WAN/MPLS edge, eBGP in `TENANT_A` |
+| Border leafs | `ar-lf-5` / `ar-lf-6` -> WAN/MPLS edge, eBGP in `PROD` |
 
 Placeholders to substitute in the commands below:
 
 ```
-VRF       = TENANT_A
+VRF       = PROD
 L3VNI     = 10100
 VNIs      = 10010 10020 10030
 VTEP IPs  = 10.1.0.11 ... 10.1.0.16
@@ -162,18 +162,18 @@ from type-3 routes).
 
 ```
 show vrf                                 ! VRF list, interfaces, route count
-show vrf TENANT_A
-show vxlan vni                           ! TENANT_A <-> 10100 mapping
-show running-config | section vrf instance TENANT_A
-show ip route vrf TENANT_A
+show vrf PROD
+show vxlan vni                           ! PROD <-> 10100 mapping
+show running-config | section vrf instance PROD
+show ip route vrf PROD
 show bgp evpn route-type ip-prefix ipv4  ! type-5 routes
-show vxlan address-table vrf TENANT_A    ! remote router MACs (if supported on the platform)
+show vxlan address-table vrf PROD    ! remote router MACs (if supported on the platform)
 show bgp evpn route-type mac-ip          ! RMAC extended community on the type-2/5 routes
 ```
 
-**PASS:** `show vxlan vni` lists VNI 10100 as `L3` for `TENANT_A`; remote routes in the
-VRF point to a remote VTEP next-hop. `ip routing vrf TENANT_A` must be enabled
-(`show ip route vrf TENANT_A` fails or is empty if not).
+**PASS:** `show vxlan vni` lists VNI 10100 as `L3` for `PROD`; remote routes in the
+VRF point to a remote VTEP next-hop. `ip routing vrf PROD` must be enabled
+(`show ip route vrf PROD` fails or is empty if not).
 
 ### 4.4 Data-plane reachability to a remote VTEP
 
@@ -246,7 +246,7 @@ show bgp evpn route-type mac-ip <aaaa.bbbb.cccc> detail
 show bgp evpn route-type mac-ip | include <host-ip>
 show mac address-table vlan 10                           ! local + VXLAN-learned
 show vxlan address-table vlan 10                         ! VXLAN-learned only
-show ip arp vrf TENANT_A                                 ! IP/MAC bindings
+show ip arp vrf PROD                                 ! IP/MAC bindings
 ```
 
 Validate end to end (host H1 on lf-1 VLAN 10, learning on lf-1, reaching lf-3):
@@ -275,9 +275,9 @@ show bgp evpn route-type mac-ip <mac> detail | include Mobility|seq
 ```
 show bgp evpn route-type ip-prefix ipv4
 show bgp evpn route-type ip-prefix ipv4 detail
-show ip bgp vrf TENANT_A
-show ip route vrf TENANT_A
-show running-config | section router bgp | section vrf TENANT_A
+show ip bgp vrf PROD
+show ip route vrf PROD
+show running-config | section router bgp | section vrf PROD
 ```
 
 On non-border leafs a default or external prefix (for example from the WAN edge)
@@ -292,7 +292,7 @@ Goal: given a MAC (or IP), find which leaf and port it sits on.
 ### Step 1 - find the MAC from the IP (any leaf)
 
 ```
-show ip arp vrf TENANT_A 10.20.10.50
+show ip arp vrf PROD 10.20.10.50
 show bgp evpn route-type mac-ip | include 10.20.10.50
 ```
 
@@ -338,14 +338,14 @@ MAC seen on two leafs or flapping: look for a loop or duplicate address:
 show ip virtual-router                           ! virtual MAC and per-SVI virtual IP state
 show ip interface Vlan10                         ! SVI + virtual address
 show interfaces Vlan10
-show ip route vrf TENANT_A
-show ip arp vrf TENANT_A
+show ip route vrf PROD
+show ip arp vrf PROD
 show running-config interfaces Vlan10 Vlan100
 ```
 
 Checks:
 
-* Local subnets 10.20.10/20/30.0/24 as connected; remote subnets learned via BGP/EVPN with the next-hop as the remote VTEP and the VXLAN encapsulation (`show ip route vrf TENANT_A 10.20.20.0/24` shows `Vlan100`/VXLAN).
+* Local subnets 10.20.10/20/30.0/24 as connected; remote subnets learned via BGP/EVPN with the next-hop as the remote VTEP and the VXLAN encapsulation (`show ip route vrf PROD 10.20.20.0/24` shows `Vlan100`/VXLAN).
 * Same virtual IP and virtual MAC on every leaf (`show ip virtual-router`, `ip virtual-router mac-address` in the config).
 * Symmetric IRB: from lf-1, a host route to a remote-subnet host (learned via type-2 with IP) points to the remote VTEP over the L3VNI.
 
@@ -353,7 +353,7 @@ Checks:
 
 ### 8.1 Rules that make results meaningful
 
-* Underlay (loopback to loopback) is in the **default** VRF; tenant traffic is in `TENANT_A`. Always select the VRF explicitly with `ping vrf TENANT_A ...`.
+* Underlay (loopback to loopback) is in the **default** VRF; tenant traffic is in `PROD`. Always select the VRF explicitly with `ping vrf PROD ...`.
 * Source from the right interface: `source Loopback0` for underlay tests, `source Vlan10` for tenant tests.
 * In VXLAN the tenant path appears as one routed hop to the remote anycast gateway; the underlay hops (spine) are encapsulated and not visible in a tenant traceroute. Test the two layers separately.
 
@@ -378,10 +378,10 @@ ping <spine-link-ip> source Ethernet2
 From lf-1, via the anycast gateway on VLAN 10 to a host/SVI on another leaf:
 
 ```
-ping vrf TENANT_A 10.20.20.254 source Vlan10              ! local GW, sanity
-ping vrf TENANT_A 10.20.20.50 source Vlan10               ! host in other subnet behind lf-3
-traceroute vrf TENANT_A 10.20.20.50 source Vlan10
-ping vrf TENANT_A 10.20.10.60 source Vlan10 size 1422 df-bit   ! same-subnet host, DF set
+ping vrf PROD 10.20.20.254 source Vlan10              ! local GW, sanity
+ping vrf PROD 10.20.20.50 source Vlan10               ! host in other subnet behind lf-3
+traceroute vrf PROD 10.20.20.50 source Vlan10
+ping vrf PROD 10.20.10.60 source Vlan10 size 1422 df-bit   ! same-subnet host, DF set
 ```
 
 Same-subnet test (L2 VNI) uses a host in VLAN 10 on a remote leaf; if it fails while
@@ -395,17 +395,17 @@ test the control plane but not the exact host path.
 
 ```
 ! On border leaf (ar-lf-5): the eBGP session in the tenant VRF
-show ip bgp summary vrf TENANT_A
-show ip bgp neighbors <wan-peer> vrf TENANT_A
-show ip bgp neighbors <wan-peer> vrf TENANT_A advertised-routes
-show ip bgp neighbors <wan-peer> vrf TENANT_A received-routes
-ping vrf TENANT_A <wan-peer>
-ping vrf TENANT_A <external-prefix-host> source Vlan10
-traceroute vrf TENANT_A <external-ip> source Vlan10
+show ip bgp summary vrf PROD
+show ip bgp neighbors <wan-peer> vrf PROD
+show ip bgp neighbors <wan-peer> vrf PROD advertised-routes
+show ip bgp neighbors <wan-peer> vrf PROD received-routes
+ping vrf PROD <wan-peer>
+ping vrf PROD <external-prefix-host> source Vlan10
+traceroute vrf PROD <external-ip> source Vlan10
 
 ! On a normal leaf (ar-lf-1): external reachable through the border VTEP
-show ip route vrf TENANT_A <external-prefix>
-traceroute vrf TENANT_A <external-ip> source Vlan10
+show ip route vrf PROD <external-prefix>
+traceroute vrf PROD <external-ip> source Vlan10
 ```
 
 Expected from lf-1 toward external: next-hop = border leaf VTEP (10.1.0.15 and/or
@@ -478,7 +478,7 @@ Common faults:
 | VNI not listed in `show vxlan vni` | `vxlan vlan N vni X` under `interface Vxlan1`, `no shutdown` on Vxlan1, VLAN exists |
 | Remote VTEP count lower than expected | Missing type-3 from that leaf; check its VNI config, `vxlan flood vtep`, and its BGP |
 | Type-2 present, ping fails | MTU (VXLAN adds 50 bytes), ARP in the VRF, RMAC missing, `show vxlan config-sanity` |
-| L3 traffic black-holed | `vxlan vrf TENANT_A vni 10100` missing, `ip routing vrf TENANT_A` off, no RMAC |
+| L3 traffic black-holed | `vxlan vrf PROD vni 10100` missing, `ip routing vrf PROD` off, no RMAC |
 | EVPN routes received but not installed | `ip virtual-router mac-address` mismatch, RT import/export mismatch on the VLAN/VRF in `router bgp` |
 | Intermittent loss to one host | Duplicate MAC/IP, MAC mobility flapping (`show logging | include MAC_MOVE|DUPLICATE`) |
 | Spine rewrites next-hop | Missing `next-hop-unchanged` on the spine EVPN neighbors |
@@ -526,11 +526,11 @@ Print/paste into the change ticket. Mark each as PASS/FAIL.
 | 9 | Remote VTEPs | `show vxlan vtep` | all carrying leafs listed |
 | 10 | Type-3 | `show bgp evpn route-type imet` | 1 per remote VTEP per VNI |
 | 11 | Type-2 | `show bgp evpn route-type mac-ip` | test host MAC/IP learned remotely |
-| 12 | L3 VNI | `show vxlan vni` | TENANT_A 10100 present, RMACs on routes |
+| 12 | L3 VNI | `show vxlan vni` | PROD 10100 present, RMACs on routes |
 | 13 | Anycast GW | `show ip virtual-router` | same IP/MAC on all leafs |
-| 14 | Inter-subnet ping | `ping vrf TENANT_A ... source Vlan10` | success across leafs |
-| 15 | External BGP (lf-5/6) | `show ip bgp summary vrf TENANT_A` | WAN peer Estab |
-| 16 | External reachability | `traceroute vrf TENANT_A ...` | via border leaf to WAN |
+| 14 | Inter-subnet ping | `ping vrf PROD ... source Vlan10` | success across leafs |
+| 15 | External BGP (lf-5/6) | `show ip bgp summary vrf PROD` | WAN peer Estab |
+| 16 | External reachability | `traceroute vrf PROD ...` | via border leaf to WAN |
 | 17 | Logs clean | `show logging last 15 minutes` | no flaps / errors |
 | 18 | VXLAN sanity | `show vxlan config-sanity` | no FAIL lines |
 | 19 | No unsaved changes | `show running-config diffs` | empty (running == startup) |
@@ -566,7 +566,7 @@ show running-config | include virtual-router               ! anycast gateway MAC
 ```
 
 Applied value of a single section without the full dump: `show running-config | section <regex>`.
-`show running-config | section vrf TENANT_A` lists the VRF block in `router bgp` as well.
+`show running-config | section vrf PROD` lists the VRF block in `router bgp` as well.
 
 ### 13.3 Changes, history and drift
 
@@ -628,13 +628,13 @@ re-running the playbook.
 | Type-2 routes | `show bgp l2vpn evpn route type macip` | `show bgp evpn route-type mac-ip` |
 | Type-3 routes | `show bgp l2vpn evpn route type multicast` | `show bgp evpn route-type imet` |
 | Type-5 routes | `show bgp l2vpn evpn route type prefix` | `show bgp evpn route-type ip-prefix ipv4` |
-| ARP/ND | `ip neigh show vrf TENANT_A` | `show ip arp vrf TENANT_A` |
-| Routes in VRF | `nv show vrf TENANT_A router rib ipv4 route` / `ip route show vrf` | `show ip route vrf TENANT_A` |
+| ARP/ND | `ip neigh show vrf PROD` | `show ip arp vrf PROD` |
+| Routes in VRF | `nv show vrf PROD router rib ipv4 route` / `ip route show vrf` | `show ip route vrf PROD` |
 | Anycast gateway | `nv show interface vlan10 ip vrr` | `show ip virtual-router` |
 | Interfaces | `nv show interface` | `show interfaces status` |
 | LLDP | `nv show service lldp neighbor` | `show lldp neighbors` |
 | BFD | `show bfd peers brief` | `show bfd peers` |
-| VRF with ping | `ip vrf exec TENANT_A ping ...` | `ping vrf TENANT_A ...` |
+| VRF with ping | `ip vrf exec PROD ping ...` | `ping vrf PROD ...` |
 | Packet capture | `tcpdump -i swp1` | `bash tcpdump -i et1` |
 | Applied config | `nv config show -o commands` | `show running-config` |
 | Pending / saved diff | `nv config diff`, `nv config diff applied startup` | `show session-config diffs`, `show running-config diffs` |

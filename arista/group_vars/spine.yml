@@ -1,0 +1,9 @@
+---
+device_role: spine
+router_asn: "{{ spine_asn }}"
+
+# Leaf-facing ports, addresses and leaf ASNs are not listed here - the
+# spine templates derive them from each leaf's uplinks (host_vars), so a
+# link is only ever defined once, on the leaf side.
+underlay_peer_group: LEAFS
+evpn_peer_group: EVPN

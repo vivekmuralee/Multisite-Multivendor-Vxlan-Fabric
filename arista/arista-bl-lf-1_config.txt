@@ -1,0 +1,160 @@
+! Command: show running-config
+! device: arista-bl-lf-1 (vEOS-lab, EOS-4.35.1F)
+!
+! boot system flash:/vEOS-lab.swi
+!
+no aaa root
+!
+username admin privilege 15 role network-admin secret sha512 $6$qyWPPYYAvXCtaqEE$/7jsJwtT9C1OY5Pl9B9wYIxyDxmqZuUAWiovBgvjz9jsFHsxv6/rcT.HMGpL7np72nJvJJe9uKwVl5f8uL0Kb.
+!
+no service interface inactive port-id allocation disabled
+!
+service routing protocols model multi-agent
+!
+hostname arista-bl-lf-1
+!
+spanning-tree mode mstp
+!
+system l1
+   unsupported speed action error
+   unsupported error-correction action error
+!
+clock timezone US/Pacific
+!
+vlan 10
+   name WEB
+!
+vlan 20
+   name APP
+!
+vlan 1000
+   name PROD_L3VNI
+!
+vrf instance PROD
+!
+vrf instance mgmt
+!
+interface Ethernet1
+   description SPINE-01
+   mtu 9214
+   no switchport
+   ip address 10.0.1.5/31
+!
+interface Ethernet2
+   description SPINE-02
+   mtu 9214
+   no switchport
+   ip address 10.0.2.5/31
+!
+interface Ethernet3
+   mtu 9214
+!
+interface Ethernet4
+   mtu 9214
+!
+interface Ethernet5
+   mtu 9214
+!
+interface Ethernet6
+   mtu 9214
+!
+interface Ethernet7
+!
+interface Ethernet8
+!
+interface Ethernet9
+!
+interface Ethernet10
+!
+interface Ethernet11
+!
+interface Ethernet12
+!
+interface Loopback0
+   ip address 10.255.0.13/32
+!
+interface Loopback1
+   ip address 10.255.1.13/32
+!
+interface Management1
+   vrf mgmt
+   ip address 192.168.122.26/24
+!
+interface Vlan10
+   description WEB_ANYCAST_GW
+   vrf PROD
+   ip address virtual 10.10.10.254/24
+!
+interface Vlan20
+   description APP_ANYCAST_GW
+   vrf PROD
+   ip address virtual 10.10.20.254/24
+!
+interface Vxlan1
+   vxlan source-interface Loopback1
+   vxlan udp-port 4789
+   vxlan vlan 10 vni 10010
+   vxlan vlan 20 vni 10020
+   vxlan vrf PROD vni 50000
+!
+ip virtual-router mac-address 00:1c:73:00:00:01
+!
+ip routing
+ip routing vrf PROD
+no ip routing vrf mgmt
+!
+ip route vrf mgmt 0.0.0.0/0 192.168.122.1
+!
+ntp local-interface Management1
+ntp server vrf mgmt 8.8.8.8
+!
+router bgp 65103
+   router-id 10.255.0.13
+   maximum-paths 2 ecmp 2
+   neighbor EVPN peer group
+   neighbor EVPN remote-as 65000
+   neighbor EVPN update-source Loopback0
+   neighbor EVPN ebgp-multihop 3
+   neighbor EVPN send-community extended
+   neighbor SPINES peer group
+   neighbor UNDERLAY peer group
+   neighbor UNDERLAY remote-as 65000
+   neighbor 10.0.1.4 peer group UNDERLAY
+   neighbor 10.0.2.4 peer group UNDERLAY
+   neighbor 10.255.0.1 peer group EVPN
+   neighbor 10.255.0.2 peer group EVPN
+   redistribute connected
+   !
+   vlan 10
+      rd 10.255.0.13:10010
+      route-target both 10010:10010
+      redistribute learned
+   !
+   vlan 20
+      rd 10.255.0.13:10020
+      route-target both 10020:10020
+      redistribute learned
+   !
+   address-family evpn
+      neighbor EVPN activate
+   !
+   address-family ipv4
+      neighbor SPINES activate
+      neighbor UNDERLAY activate
+      network 10.255.0.13/32
+      network 10.255.1.13/32
+   !
+   vrf PROD
+      rd 10.255.0.13:50000
+      route-target import evpn 50000:50000
+      route-target export evpn 50000:50000
+      redistribute connected
+!
+router multicast
+   ipv4
+      software-forwarding kernel
+   !
+   ipv6
+      software-forwarding kernel
+!
+end

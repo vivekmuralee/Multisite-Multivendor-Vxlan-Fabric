@@ -1,0 +1,5 @@
+ansible==9.2.0
+ansible-core==2.16.3
+jmespath==1.0.1
+netaddr==0.8.0
+paramiko==3.4.0

@@ -1,0 +1,46 @@
+---
+# Render every switch's config to build/<host>/ without touching any device,
+# to review a change or diff it against the captured *_config.txt files.
+#
+# Usage:
+#   ansible-playbook render.yml
+#   ansible-playbook render.yml --limit arista-lf-1
+
+- name: Render EOS configuration locally
+  hosts: fabric
+  gather_facts: false
+  tasks:
+    - name: Create build directory
+      ansible.builtin.file:
+        path: "build/{{ inventory_hostname }}"
+        state: directory
+        mode: "0755"
+      delegate_to: localhost
+
+    - name: Render base and underlay
+      ansible.builtin.template:
+        src: "roles/{{ item.role }}/templates/{{ item.template }}"
+        dest: "build/{{ inventory_hostname }}/{{ item.file }}"
+        mode: "0644"
+      loop:
+        - { role: arista_base, template: base.j2, file: 10-base.cfg }
+        - { role: arista_underlay, template: underlay.j2, file: 20-underlay.cfg }
+      delegate_to: localhost
+
+    - name: Render overlay
+      ansible.builtin.template:
+        src: roles/arista_overlay/templates/overlay.j2
+        dest: "build/{{ inventory_hostname }}/30-overlay.cfg"
+        mode: "0644"
+      when: inventory_hostname in groups['leaf']
+      delegate_to: localhost
+
+    - name: Render border gateway
+      ansible.builtin.template:
+        src: roles/arista_border_leaf/templates/border_leaf.j2
+        dest: "build/{{ inventory_hostname }}/40-border_leaf.cfg"
+        mode: "0644"
+      when:
+        - inventory_hostname in groups['border_leaf']
+        - wan_uplinks | length > 0
+      delegate_to: localhost

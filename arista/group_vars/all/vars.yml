@@ -1,0 +1,56 @@
+---
+# ---------------------------------------------------------------------------
+# Global fabric-wide variables
+# ---------------------------------------------------------------------------
+
+# EOS over SSH CLI. The login password is sourced from the vault-encrypted
+# vault_ansible_password in group_vars/all/vault.yml (see vault.yml.example -
+# never store the plaintext password here, this file is committed to git).
+ansible_connection: ansible.netcommon.network_cli
+ansible_network_os: arista.eos.eos
+ansible_user: admin
+ansible_password: "{{ vault_ansible_password }}"
+ansible_become: true
+ansible_become_method: enable
+
+# Management - Management1 lives in vrf mgmt; its address is ansible_host
+# (inventory/hosts.yml) with this prefix length.
+mgmt_vrf: mgmt
+mgmt_prefixlen: 24
+mgmt_gateway: 192.168.122.1
+timezone: US/Pacific
+
+# 8.8.8.8 is Google DNS, not NTP. 216.239.35.0 is time.google.com.
+ntp_servers:
+  - 216.239.35.0
+
+fabric_mtu: 9214
+
+# Underlay - numbered /31 point-to-point links, spines share one ASN and
+# every leaf has its own (router_asn in host_vars).
+spine_asn: 65000
+p2p_prefixlen: 31
+bgp_ecmp: 2
+
+# Tenant L2 VNIs stretched across every leaf. Every leaf configures the same
+# SVI / anycast gateway for each VLAN (symmetric IRB, distributed anycast GW).
+# RD is <router_id>:<vni>, RT is <vni>:<vni>.
+vni_mappings:
+  - vlan: 10
+    vni: 10010
+    name: WEB
+    anycast_gw_ip: 10.10.10.254/24
+  - vlan: 20
+    vni: 10020
+    name: APP
+    anycast_gw_ip: 10.10.20.254/24
+
+# L3 VNI used for symmetric IRB / inter-subnet routing within the tenant VRF.
+# EOS allocates the L3 VNI's internal VLAN itself - no VLAN is needed here.
+l3vni:
+  vrf: PROD
+  vni: 50000
+  route_target: "50000:50000"
+
+# Shared anycast gateway MAC - must be identical on every leaf.
+anycast_gw_mac: "00:1c:73:00:00:99"

@@ -1,0 +1,5 @@
+---
+- name: Push base configuration - hostname, management, NTP
+  arista.eos.eos_config:
+    src: base.j2
+    save_when: modified

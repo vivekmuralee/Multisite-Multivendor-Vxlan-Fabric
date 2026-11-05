@@ -1,0 +1,6 @@
+---
+- name: Push border gateway - WAN links + VRF-lite eBGP
+  arista.eos.eos_config:
+    src: border_leaf.j2
+    save_when: modified
+  when: wan_uplinks | length > 0

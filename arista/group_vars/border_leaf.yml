@@ -1,0 +1,11 @@
+---
+device_role: border_leaf
+border_leaf: true
+
+# The border leafs were built with an UNDERLAY peer group rather than
+# SPINES - kept as-is so a push does not create a second group.
+underlay_peer_group: UNDERLAY
+
+# MTU on the WAN-facing links. The PE interfaces must match - a mismatch
+# lets BGP come up but silently drops large packets.
+wan_mtu: "{{ fabric_mtu }}"

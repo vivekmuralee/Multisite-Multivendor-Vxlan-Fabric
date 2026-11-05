@@ -1,0 +1,23 @@
+---
+router_asn: 65103
+router_id: 10.255.0.13
+vtep_ip: 10.255.1.13
+
+uplinks:
+  - { interface: Ethernet1, description: SPINE-01, peer: arista-sp-1, peer_interface: Ethernet3, ip: 10.0.1.5, peer_ip: 10.0.1.4 }
+  - { interface: Ethernet2, description: SPINE-02, peer: arista-sp-2, peer_interface: Ethernet3, ip: 10.0.2.5, peer_ip: 10.0.2.4 }
+
+host_ports: []
+
+# VRF-lite eBGP to the WAN/MPLS edge, inside vrf PROD. Example:
+#   - interface: Ethernet3
+#     description: "arista-bl-lf-1 -> PE1 (WAN/MPLS edge)"
+#     local_ip: 192.168.200.1/30
+#     peer_ip: 192.168.200.2
+#     peer_asn: 65201
+wan_uplinks: []
+
+# Also remove the empty SPINES peer group left over on this switch.
+eos_cleanup_bgp:
+  - no redistribute connected
+  - no neighbor SPINES peer group

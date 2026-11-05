@@ -1,0 +1,5 @@
+---
+- name: Push underlay - loopbacks, p2p links, eBGP underlay + EVPN peering
+  arista.eos.eos_config:
+    src: underlay.j2
+    save_when: modified

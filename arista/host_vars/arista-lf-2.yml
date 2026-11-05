@@ -1,0 +1,12 @@
+---
+router_asn: 65102
+router_id: 10.255.0.12
+vtep_ip: 10.255.1.12
+
+uplinks:
+  - { interface: Ethernet1, description: SPINE-01, peer: arista-sp-1, peer_interface: Ethernet2, ip: 10.0.1.3, peer_ip: 10.0.1.2 }
+  - { interface: Ethernet2, description: SPINE-02, peer: arista-sp-2, peer_interface: Ethernet2, ip: 10.0.2.3, peer_ip: 10.0.2.2 }
+
+host_ports:
+  - { interface: Ethernet8, description: PC3, vlan: 10 }
+  - { interface: Ethernet9, description: PC4, vlan: 20 }

@@ -1,0 +1,5 @@
+---
+- name: Push VXLAN overlay - VLANs, VNIs, anycast gateways, tenant VRF
+  arista.eos.eos_config:
+    src: overlay.j2
+    save_when: modified

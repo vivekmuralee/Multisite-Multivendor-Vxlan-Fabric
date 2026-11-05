@@ -1,0 +1,6 @@
+---
+# Copy to group_vars/all/vault.yml, set the password, then encrypt it:
+#   cp vault.yml.example group_vars/all/vault.yml
+#   ansible-vault encrypt group_vars/all/vault.yml
+# The vault password itself goes in ~/.ansible/arista_vault_pass (ansible.cfg).
+vault_ansible_password: CHANGE_ME

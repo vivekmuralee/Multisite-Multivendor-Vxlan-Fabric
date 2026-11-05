@@ -1,0 +1,18 @@
+---
+router_asn: 65104
+router_id: 10.255.0.14
+vtep_ip: 10.255.1.14
+
+uplinks:
+  - { interface: Ethernet1, description: SPINE-01, peer: arista-sp-1, peer_interface: Ethernet4, ip: 10.0.1.7, peer_ip: 10.0.1.6 }
+  - { interface: Ethernet2, description: SPINE-02, peer: arista-sp-2, peer_interface: Ethernet4, ip: 10.0.2.7, peer_ip: 10.0.2.6 }
+
+host_ports: []
+
+# VRF-lite eBGP to the WAN/MPLS edge, inside vrf PROD. Example:
+#   - interface: Ethernet3
+#     description: "arista-bl-lf-2 -> PE2 (WAN/MPLS edge)"
+#     local_ip: 192.168.200.5/30
+#     peer_ip: 192.168.200.6
+#     peer_asn: 65202
+wan_uplinks: []

@@ -1,0 +1,14 @@
+---
+device_role: leaf
+
+underlay_peer_group: SPINES
+evpn_peer_group: EVPN
+
+# One-off remediation of the captured running configs. eos_config only adds
+# lines, so stale config is removed with explicit "no" commands - run with
+#   ansible-playbook site.yml --tags cleanup
+eos_cleanup_global:
+  - no vlan 1000
+  - no ntp server vrf mgmt 8.8.8.8
+eos_cleanup_bgp:
+  - no redistribute connected

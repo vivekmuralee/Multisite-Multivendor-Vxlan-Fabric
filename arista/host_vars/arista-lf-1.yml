@@ -1,0 +1,14 @@
+---
+router_asn: 65101
+router_id: 10.255.0.11
+vtep_ip: 10.255.1.11
+
+# Spine uplinks. peer_interface is the spine-side port - the spine
+# templates build their side of each link from this list.
+uplinks:
+  - { interface: Ethernet1, description: SPINE-01, peer: arista-sp-1, peer_interface: Ethernet1, ip: 10.0.1.1, peer_ip: 10.0.1.0 }
+  - { interface: Ethernet2, description: SPINE-02, peer: arista-sp-2, peer_interface: Ethernet1, ip: 10.0.2.1, peer_ip: 10.0.2.0 }
+
+host_ports:
+  - { interface: Ethernet8, description: PC1, vlan: 10 }
+  - { interface: Ethernet9, description: PC2, vlan: 20 }
