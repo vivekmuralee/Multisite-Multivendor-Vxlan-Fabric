@@ -26,6 +26,32 @@ To resize a worker: `kubectl drain`, `virsh shutdown`, `virsh setmaxmem/setmem <
 
 ## Prerequisites
 - SSH key login as `vivekmuralee` on every node, with passwordless sudo.
+- Ansible from the repo venv (`make venv`). The pinned `ansible==9.2.0` already bundles the
+  two collections the playbook uses; with bare ansible-core, install
+  [requirements.yml](requirements.yml).
+
+## Building the VMs (manual, before the playbook)
+The VMs are not created by Ansible. They are Ubuntu 24.04.5 clones on libvirt, and their
+exported definitions are in [libvirt/](libvirt/):
+
+| File | What |
+|---|---|
+| `libvirt/network.xml` | libvirt network `network` (virbr0, NAT, 192.168.122.0/24, DHCP .128-.240) |
+| `libvirt/kubemaster-{1..3}.xml` | 2 vCPU, 8 GiB, 50 GB qcow2 in `/var/lib/libvirt/images/` |
+| `libvirt/kubeworker-{1..3}.xml` | 8 vCPU, 32 GiB, 50 GB qcow2 |
+| `libvirt/netplan-50-cloud-init.yaml.example` | static IP per node (.91-.96) |
+
+To rebuild from scratch:
+```
+virsh net-define libvirt/network.xml && virsh net-start network && virsh net-autostart network
+# Create each disk (clone of the Ubuntu base image) at the path in the XML, then:
+virsh define libvirt/kubemaster-1.xml && virsh start kubemaster-1     # repeat per node
+# On each console: set the static IP from the netplan example, `sudo netplan apply`,
+# and add your SSH key for vivekmuralee.
+```
+The exported XMLs carry each VM's UUID and MAC; drop those lines if you define them next
+to the existing VMs. kubemaster-1 uses an e1000e NIC (`enp8s0`); the rest use virtio (`enp1s0`).
+The playbook's first play then gives each clone a unique machine-id and SSH host keys.
 
 ## Run
 ```
