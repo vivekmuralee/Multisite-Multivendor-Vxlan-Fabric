@@ -1,34 +1,23 @@
 # Multisite-Multivendor-Vxlan-Fabric
-Ansible and Python program files for deploying Vxlan Fabric and Telemetry 
 
-This project will help in deploying a Multisite Multivendor Vxlan BGP-EVPN on a GNS3 platform 
+Ansible and Python files for deploying a multisite, multivendor VXLAN BGP-EVPN fabric and its telemetry, built on a GNS3 platform.
 
-The project will have a Vxlan fabric running on several different platforms with individual fabric running on different vendor platforms
+Each site runs its own VXLAN fabric on a different vendor platform:
 
-Platforms Listed below 
+1. Cisco NX-OS 9K
+2. Arista EOS
+3. Cumulus Linux
 
-1.Cisco NXOS 9K  
-2.Arista EOS
-3.Cumulus OS
+The fabrics are interconnected over an MPLS routing backbone running on Cisco IOS.
 
+## Phases
 
-All the above mentioned platforms will have a datacenter fabric running Vxlan EVPN 
+**Phase 1:** Build a VXLAN fabric on each platform and advertise the overlay networks to the routing backbone.
 
-All the different fabric will be interconnected over an MPLS Routing backbone running on Cisco IOS platform 
+**Phase 2:** Deploy an MPLS backbone on Cisco IOS with an OSPF underlay and a BGP vpnv4 overlay. Exchange the routes learned from each VXLAN fabric using BGP vpnv4 and route targets.
 
-Phase-1 
+**Phase 3:** Define a multisite network between two VXLAN fabrics using a BGP underlay, and test failover.
 
-Phase-1 will be to built Vxlan fabric on all the different platform and advertising the different overlay networks to the routing backbone
-
-Phase-2
-
-To deploy an MPLS backbone on Cisco IOS platform with OSPF underlay and BGP vpnv4 overlay 
-
-Advertise the learned routes from the different VXlan fabric between each other using BGP vnpv4 and Route-Target
-
-Phase-3
-
-Define a Multisite network which is supported between 2 different Vxlan fabrics using BGP underlay and testing failover.
 
 ## Repository layout
 
