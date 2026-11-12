@@ -1,0 +1,4 @@
+# Kubelet reservations for 8 vCPU / 32 GiB worker VMs.
+kubelet_system_reserved: { cpu: 500m, memory: 1Gi, ephemeral-storage: 2Gi }
+kubelet_kube_reserved:   { cpu: 500m, memory: 1Gi, ephemeral-storage: 1Gi }
+kubelet_eviction_memory: 500Mi

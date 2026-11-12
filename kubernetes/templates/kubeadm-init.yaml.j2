@@ -1,0 +1,44 @@
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+certificateKey: "{{ k8s_cert_key }}"
+localAPIEndpoint:
+  advertiseAddress: {{ ansible_host }}
+  bindPort: {{ k8s_api_port }}
+nodeRegistration:
+  name: {{ inventory_hostname }}
+  criSocket: unix:///run/containerd/containerd.sock
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+clusterName: {{ k8s_cluster_name }}
+kubernetesVersion: v{{ k8s_version }}
+controlPlaneEndpoint: "{{ k8s_api_vip }}:{{ k8s_api_port }}"
+apiServer:
+  certSANs:
+    - {{ k8s_api_vip }}
+{% for h in groups['k8s_masters'] %}
+    - {{ h }}
+    - {{ hostvars[h].ansible_host }}
+{% endfor %}
+# Expose control-plane metrics to Prometheus (kube-prometheus-stack).
+controllerManager:
+  extraArgs:
+    - { name: bind-address, value: "0.0.0.0" }
+scheduler:
+  extraArgs:
+    - { name: bind-address, value: "0.0.0.0" }
+etcd:
+  local:
+    extraArgs:
+      - { name: listen-metrics-urls, value: "http://0.0.0.0:2381" }
+networking:
+  podSubnet: {{ k8s_pod_cidr }}
+  serviceSubnet: {{ k8s_service_cidr }}
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd
+---
+apiVersion: kubeproxy.config.k8s.io/v1alpha1
+kind: KubeProxyConfiguration
+metricsBindAddress: "0.0.0.0:10249"

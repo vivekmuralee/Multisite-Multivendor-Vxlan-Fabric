@@ -1,0 +1,41 @@
+# mimir-distributed values (rendered by Ansible, tag: mimir)
+# Mimir config holds the S3 (MinIO) keys -> store it as a Secret, not a ConfigMap.
+configStorageType: Secret
+
+mimir:
+  structuredConfig:
+    limits:
+      compactor_blocks_retention_period: {{ mimir_retention }}
+      max_global_series_per_user: 1500000
+      ingestion_rate: 100000
+      ingestion_burst_size: 1000000
+      max_label_names_per_series: 40
+
+minio:
+  enabled: true
+  rootUser: mimir
+  rootPassword: "{{ mimir_minio_password }}"
+  persistence:
+    size: {{ mimir_minio_storage }}
+
+kafka:
+  persistence:
+    size: {{ mimir_kafka_storage }}
+
+ingester:
+  persistentVolume:
+    size: {{ mimir_ingester_storage }}
+
+# Self-monitoring: Prometheus scrapes Mimir, Grafana gets the Mimir dashboards,
+# and Mimir's recommended alerts/recording rules are loaded.
+metaMonitoring:
+  serviceMonitor:
+    enabled: true
+    clusterLabel: {{ k8s_cluster_label }}
+  dashboards:
+    enabled: true
+    namespace: {{ monitoring_namespace }}
+  prometheusRule:
+    enabled: true
+    mimirAlerts: true
+    mimirRules: true

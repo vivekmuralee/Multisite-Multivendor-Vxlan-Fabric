@@ -1,0 +1,24 @@
+# Managed by Ansible (kubernetes/site.yml, tag: kubelet)
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+# Request a CA-signed serving cert (approved by the playbook) so metrics-server
+# and the API server can verify the kubelet's TLS identity.
+serverTLSBootstrap: true
+systemReserved:
+{% for k, v in kubelet_system_reserved.items() %}
+  {{ k }}: "{{ v }}"
+{% endfor %}
+kubeReserved:
+{% for k, v in kubelet_kube_reserved.items() %}
+  {{ k }}: "{{ v }}"
+{% endfor %}
+evictionHard:
+  memory.available: "{{ kubelet_eviction_memory }}"
+  nodefs.available: "10%"
+  nodefs.inodesFree: "5%"
+  imagefs.available: "15%"
+evictionSoft:
+  memory.available: "{{ (kubelet_eviction_memory | regex_replace('Mi$', '') | int * 2) }}Mi"
+evictionSoftGracePeriod:
+  memory.available: "1m30s"
+evictionMaxPodGracePeriod: 60

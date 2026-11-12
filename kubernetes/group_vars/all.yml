@@ -1,0 +1,66 @@
+# Versions
+k8s_minor: "1.37"            # apt repo channel on pkgs.k8s.io
+k8s_version: "1.37.2"        # passed to kubeadm as kubernetesVersion
+kube_vip_version: "v1.3.1"
+calico_version: "v3.33.0"
+
+# Control-plane VIP (kube-vip, ARP mode). Outside the libvirt DHCP range (.128-.240).
+k8s_api_vip: 192.168.122.90
+k8s_api_port: 6443
+
+# Must not overlap 192.168.122.0/24 (Calico's default 192.168.0.0/16 does).
+k8s_pod_cidr: 10.244.0.0/16
+k8s_service_cidr: 10.96.0.0/12
+k8s_cluster_name: kube-lab
+
+k8s_first_master: "{{ groups['k8s_masters'][0] }}"
+
+# MetalLB (L2 mode) for Services of type LoadBalancer.
+# Outside libvirt DHCP (.128-.240), node IPs (.90-.97) and ubuntu-server (.100).
+metallb_version: "v0.16.2"
+metallb_pool_name: lab-pool
+metallb_addresses:
+  - 192.168.122.50-192.168.122.79
+
+# Kubelet drop-in config dir (survives kubeadm upgrade, unlike /var/lib/kubelet/config.yaml)
+kubelet_config_dir: /etc/kubernetes/kubelet.conf.d
+
+# metrics-server (HA manifest: 2 replicas + PDB). Kubelets use CA-signed serving
+# certs (serverTLSBootstrap), so metrics-server verifies them normally.
+metrics_server_version: "v0.9.1"
+
+# Grow the root LV into the free space Ubuntu's installer leaves in ubuntu-vg.
+root_lv: /dev/ubuntu-vg/ubuntu-lv
+
+# Default StorageClass (node-local hostPath volumes; data stays on the node that created it)
+local_path_version: "v0.0.37"
+local_path_dir: /opt/local-path-provisioner
+
+# Helm (installed on the first master, checksum-verified)
+helm_version: "v4.3.1"
+helm_sha256: 0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b
+
+# Monitoring: kube-prometheus-stack (Prometheus Operator, Prometheus, Alertmanager,
+# Grafana, node-exporter, kube-state-metrics). UIs exposed via MetalLB pinned IPs.
+monitoring_namespace: monitoring
+kps_chart_version: "93.2.2"
+grafana_lb_ip: 192.168.122.60
+prometheus_lb_ip: 192.168.122.61
+alertmanager_lb_ip: 192.168.122.62
+prometheus_retention: 15d
+prometheus_retention_size: 18GB
+prometheus_storage: 20Gi
+alertmanager_storage: 2Gi
+grafana_storage: 5Gi
+
+# Grafana Mimir: long-term metrics store. Prometheus remote_writes everything to
+# tenant "infra"; Grafana gets a "Mimir (infra)" data source.
+mimir_namespace: mimir
+mimir_chart_version: "6.2.2"          # Mimir 3.2.3
+mimir_tenant: infra
+mimir_retention: 30d
+mimir_minio_storage: 25Gi
+mimir_kafka_storage: 10Gi
+mimir_ingester_storage: 10Gi
+mimir_gateway: "http://mimir-gateway.{{ mimir_namespace }}.svc.cluster.local"
+k8s_cluster_label: kube-lab
