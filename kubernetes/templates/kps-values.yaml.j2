@@ -1,0 +1,105 @@
+# kube-prometheus-stack values (rendered by Ansible, tag: monitoring)
+fullnameOverride: kps
+
+crds:
+  enabled: true
+
+grafana:
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+  persistence:
+    enabled: true
+    storageClassName: local-path
+    size: {{ grafana_storage }}
+  service:
+    type: LoadBalancer
+    port: 80
+    annotations:
+      metallb.io/loadBalancerIPs: {{ grafana_lb_ip }}
+  defaultDashboardsTimezone: browser
+  # Long-term metrics: Mimir tenant "{{ mimir_tenant }}" (tenant header sent by Grafana).
+  additionalDataSources:
+    - name: Mimir (infra)
+      uid: mimir-infra
+      type: prometheus
+      access: proxy
+      url: {{ mimir_gateway }}/prometheus
+      jsonData:
+        prometheusType: Mimir
+        timeInterval: 30s
+        httpHeaderName1: X-Scope-OrgID
+      secureJsonData:
+        httpHeaderValue1: {{ mimir_tenant }}
+
+prometheus:
+  service:
+    type: LoadBalancer
+    annotations:
+      metallb.io/loadBalancerIPs: {{ prometheus_lb_ip }}
+  prometheusSpec:
+    retention: {{ prometheus_retention }}
+    externalLabels:
+      cluster: {{ k8s_cluster_label }}
+    # Ship every sample to Mimir (tenant "{{ mimir_tenant }}") for long-term storage.
+    remoteWrite:
+      - url: {{ mimir_gateway }}/api/v1/push
+        headers:
+          X-Scope-OrgID: {{ mimir_tenant }}
+        queueConfig:
+          maxSamplesPerSend: 2000
+          capacity: 10000
+    retentionSize: {{ prometheus_retention_size }}
+    # Pick up ServiceMonitors/PodMonitors/rules from any namespace,
+    # not just ones labelled for this Helm release (so your apps get scraped).
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    resources:
+      requests: { cpu: 200m, memory: 1Gi }
+      limits: { memory: 4Gi }
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: {{ prometheus_storage }}
+
+alertmanager:
+  service:
+    type: LoadBalancer
+    annotations:
+      metallb.io/loadBalancerIPs: {{ alertmanager_lb_ip }}
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: {{ alertmanager_storage }}
+
+# kubeadm control-plane endpoints (opened up by the 'cpmetrics' stage)
+kubeEtcd:
+  service:
+    port: 2381
+    targetPort: 2381
+  serviceMonitor:
+    scheme: http
+kubeControllerManager:
+  service:
+    port: 10257
+    targetPort: 10257
+kubeScheduler:
+  service:
+    port: 10259
+    targetPort: 10259
+kubeProxy:
+  service:
+    port: 10249
+    targetPort: 10249

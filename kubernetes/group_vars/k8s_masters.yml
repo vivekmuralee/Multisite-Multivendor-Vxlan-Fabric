@@ -1,0 +1,4 @@
+# Kubelet reservations for 2 vCPU / 8 GiB control-plane VMs.
+kubelet_system_reserved: { cpu: 250m, memory: 512Mi, ephemeral-storage: 1Gi }
+kubelet_kube_reserved:   { cpu: 250m, memory: 512Mi, ephemeral-storage: 1Gi }
+kubelet_eviction_memory: 300Mi
