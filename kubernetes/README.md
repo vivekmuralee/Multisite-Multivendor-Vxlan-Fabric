@@ -26,11 +26,37 @@ To resize a worker: `kubectl drain`, `virsh shutdown`, `virsh setmaxmem/setmem <
 
 ## Prerequisites
 - SSH key login as `vivekmuralee` on every node, with passwordless sudo.
+- Ansible from the repo venv (`make venv`). The pinned `ansible==9.2.0` already bundles the
+  two collections the playbook uses; with bare ansible-core, install
+  [requirements.yml](requirements.yml).
+
+## Building the VMs (manual, before the playbook)
+The VMs are not created by Ansible. They are Ubuntu 24.04.5 clones on libvirt, and their
+exported definitions are in [libvirt/](libvirt/):
+
+| File | What |
+|---|---|
+| `libvirt/network.xml` | libvirt network `network` (virbr0, NAT, 192.168.122.0/24, DHCP .128-.240) |
+| `libvirt/kubemaster-{1..3}.xml` | 2 vCPU, 8 GiB, 50 GB qcow2 in `/var/lib/libvirt/images/` |
+| `libvirt/kubeworker-{1..3}.xml` | 8 vCPU, 32 GiB, 50 GB qcow2 |
+| `libvirt/netplan-50-cloud-init.yaml.example` | static IP per node (.91-.96) |
+
+To rebuild from scratch:
+```
+virsh net-define libvirt/network.xml && virsh net-start network && virsh net-autostart network
+# Create each disk (clone of the Ubuntu base image) at the path in the XML, then:
+virsh define libvirt/kubemaster-1.xml && virsh start kubemaster-1     # repeat per node
+# On each console: set the static IP from the netplan example, `sudo netplan apply`,
+# and add your SSH key for vivekmuralee.
+```
+The exported XMLs carry each VM's UUID and MAC; drop those lines if you define them next
+to the existing VMs. kubemaster-1 uses an e1000e NIC (`enp8s0`); the rest use virtio (`enp1s0`).
+The playbook's first play then gives each clone a unique machine-id and SSH host keys.
 
 ## Run
 ```
 make run VENDOR=kubernetes                      # everything
-make run VENDOR=kubernetes ARGS="--tags prep"   # identity|prep|kubevip|init|join|cni|metallb|kubelet|metrics|disk|cpmetrics|storage|monitoring|mimir
+make run VENDOR=kubernetes ARGS="--tags prep"   # identity|prep|kubevip|init|join|cni|metallb|kubelet|metrics|disk|cpmetrics|storage|monitoring|mimir|snmp|bgp|gnmi
 ```
 The first play regenerates `/etc/machine-id` and SSH host keys once (the VMs are clones)
 and reboots each node; a marker in `/etc/k8s-node-identity-regenerated` prevents repeats.
@@ -132,3 +158,66 @@ Prometheus keeps 15 days locally and `remote_write`s every sample to Mimir under
 - **Caveat:** MinIO and Kafka are single-instance on local-path volumes, so losing that worker
   loses the long-term history. For real durability point Mimir at external S3/MinIO
   (`mimir.structuredConfig.common.storage`) and disable the bundled MinIO.
+
+## SNMP monitoring of the Cumulus fabric
+`--tags snmp` installs prometheus-snmp-exporter (chart 9.21.1) in `monitoring`, with one
+ServiceMonitor per switch (`snmp_targets`, 192.168.122.32-39, module `if_mib`, SNMPv2c).
+Prometheus picks them up and remote_writes to Mimir like everything else.
+
+- The switches must have SNMP enabled first: step "SNMP monitoring" in each
+  `cumulus/samples/*_sample_config.txt` (or the `cumulus_underlay` role).
+- `snmp_community` here must match `cumulus/group_vars/all/vars.yml`. v2c is clear text, so it
+  is read-only and limited to 192.168.122.0/24; use SNMPv3 beyond a lab.
+- Check: Prometheus -> Status -> Targets (`snmp-prometheus-snmp-exporter-*`), then query
+  `ifHCInOctets{target="cl-lf-1"}`. More modules: add names to `snmp_modules`
+  (the bundled `/etc/snmp_exporter/snmp.yml` is loaded alongside the custom auth).
+- **Dashboard:** "Cumulus VXLAN Fabric" (uid `cumulus-fabric`) is deployed from
+  `dashboards/cumulus-fabric.json` as a labelled ConfigMap that Grafana's sidecar picks up:
+  http://192.168.122.60/d/cumulus-fabric. Tiles for reachability, port state, traffic and errors;
+  BGP sessions (see below); per-switch traffic, SVI (VLAN 10/20/30) and VXLAN (vxlan48/vxlan99)
+  traffic; CPU, memory, load and uptime; and a per-port UP/DOWN table. Edit the JSON and re-run
+  `--tags snmp` (the dashboard ships with that tag).
+
+## BGP session monitoring (NVUE REST API)
+SNMP cannot report the fabric's BGP sessions: the underlay is BGP unnumbered, and FRR's BGP4-MIB
+peer table only lists peers with an IPv4 address. `--tags bgp` installs prometheus-json-exporter
+(chart 0.20.2) in `monitoring`, with one ServiceMonitor per switch (plus one for VRF `TENANT_A` on
+the border leafs, where the PE peers will appear), reading
+`https://<switch>:8765/nvue_v1/vrf/<vrf>/router/bgp/neighbor`.
+
+- **Metrics:** `bgp_peer_info{target,peer,vrf,remote_as,state}` (constant 1; state is a label),
+  `bgp_peer_uptime_msec`, `bgp_peer_connections_dropped`, `bgp_peer_prefixes_ipv4_unicast`,
+  `bgp_peer_prefixes_l2vpn_evpn`. Sessions up = `count(bgp_peer_info{state="established"})`
+  (24 in this fabric: 6+6 on the spines, 2 on each leaf and border leaf).
+- **Switches first:** the REST API is off on Cumulus 5.4. Each sample's "NVUE REST API" step (or the
+  `cumulus_underlay` role) creates the read-only `monitor` user (role `nvue-monitor`) and enables
+  the API's nginx site on :8765. `nvue_api_password` here must match the hash in
+  `cumulus/group_vars/all/vars.yml`. Basic auth over self-signed HTTPS (certificate not verified);
+  lab-grade.
+- The exporter pod is restarted on every run (the chart does not roll pods on config changes).
+- Dashboard row "BGP sessions": established / not established / resets (1h) tiles, EVPN routes
+  received per switch, a per-peer table (state, uptime, IPv4 and EVPN prefixes) and an UP/DOWN timeline.
+
+## gNMI telemetry of the Arista fabric
+`--tags gnmi` runs one `gnmic` pod (`ghcr.io/openconfig/gnmic:0.49.1`) in `monitoring`. It holds a
+gNMI `Subscribe` stream (sample, 30s) to each of the 6 Arista switches (`gnmi_targets`,
+192.168.122.24-29:6030, user `monitor`) and serves the result as Prometheus metrics on `:9804`
+(ServiceMonitor `gnmic`, so Prometheus and, via remote_write, Mimir get them too).
+
+- **Subscriptions** (in `templates/gnmic.yaml.j2`): `/interfaces/interface/state/{oper-status,admin-status,description,counters}`,
+  BGP `.../neighbors/neighbor/state` and `.../afi-safis/afi-safi/state/prefixes` (all VRFs), and
+  `/system/cpus/cpu[index=ALL]/state/idle/instant`, `/system/memory/state`.
+- **Metrics:** `gnmi_<path>` with `source` = switch name. Strings become labels
+  (`oper_status="UP"`, `session_state="ESTABLISHED"`), so state is a label on a constant 1.
+  Examples: `gnmi_interfaces_interface_state_counters_in_octets{source,interface_name}`,
+  `gnmi_network_instances_..._neighbor_state_session_state{source,network_instance_name,neighbor_neighbor_address,session_state}`.
+  Series expire 150s after a switch stops streaming.
+- **Switches first:** `arista/` role `arista_base`, tag `telemetry` (see [arista/README.md](../arista/README.md)).
+  The password in `group_vars/all.yml` (`gnmi_password`) must match the hash in
+  `arista/group_vars/all/vars.yml`. It sits in Secret `gnmic-config`.
+- **Dashboard:** "Arista VXLAN Fabric" (uid `arista-fabric`, from `dashboards/arista-fabric.json`),
+  http://192.168.122.60/d/arista-fabric: reachability, cabled-port state, traffic and errors; BGP
+  sessions (tiles, per-peer table with state/uptime/prefixes, UP/DOWN timeline, EVPN routes per
+  switch); CPU, memory, youngest-session age. Port panels only list ports that have a
+  description (spare EOS ports are admin-up and would otherwise read as faults).
+- The pod is restarted on every run (the config is a mounted Secret, read only at start).

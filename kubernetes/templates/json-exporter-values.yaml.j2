@@ -1,0 +1,67 @@
+# prometheus-json-exporter values (rendered by Ansible, tag: bgp)
+# One module per VRF: the NVUE API returns {<interface>: {<neighbor fields>}} so the
+# object path {.*} walks every BGP peer. The state is exported as a label on a constant 1
+# (bgp_peer_info) because the exporter can only turn numbers, not strings, into values;
+# sessions up = count(bgp_peer_info{state="established"}).
+configuration:
+  config: |
+    ---
+    modules:
+{% for m in [{'name': 'bgp_default', 'vrf': 'default'}, {'name': 'bgp_tenant_a', 'vrf': 'TENANT_A'}] %}
+      {{ m.name }}:
+        http_client_config:
+          tls_config:
+            insecure_skip_verify: true
+          basic_auth:
+            username: {{ nvue_api_user }}
+            password: {{ nvue_api_password }}
+        metrics:
+          - name: bgp_peer
+            type: object
+            help: BGP neighbor (from NVUE REST API)
+            path: '{.*}'
+            labels:
+              vrf: {{ m.vrf }}
+              peer: '{.remote-hostname}'
+              remote_as: '{.remote-as}'
+              router_id: '{.remote-router-id}'
+              state: '{.state}'
+            values:
+              info: 1
+              uptime_msec: '{.uptime-msec}'
+              connections_dropped: '{.connections-dropped}'
+              connections_established: '{.connections-established}'
+          - name: bgp_peer_prefixes
+            type: object
+            help: Prefixes received from the neighbor, per address family
+            path: '{.*}'
+            labels:
+              vrf: {{ m.vrf }}
+              peer: '{.remote-hostname}'
+              remote_as: '{.remote-as}'
+              router_id: '{.remote-router-id}'
+              state: '{.state}'
+            values:
+              ipv4_unicast: '{.address-family.ipv4-unicast.rx-prefix}'
+              l2vpn_evpn: '{.address-family.l2vpn-evpn.rx-prefix}'
+{% endfor %}
+
+serviceMonitor:
+  enabled: true
+  namespace: {{ monitoring_namespace }}
+  defaults:
+    interval: {{ bgp_scrape_interval }}
+    scrapeTimeout: {{ bgp_scrape_timeout }}
+  targets:
+{% for t in bgp_targets %}
+    - name: {{ t.name }}
+      url: https://{{ t.ip }}:8765/nvue_v1/vrf/default/router/bgp/neighbor
+      module: bgp_default
+{% if t.tenant_a | default(false) %}
+    - name: {{ t.name }}-tenant-a
+      url: https://{{ t.ip }}:8765/nvue_v1/vrf/TENANT_A/router/bgp/neighbor
+      module: bgp_tenant_a
+      additionalMetricsRelabels:
+        target: {{ t.name }}
+{% endif %}
+{% endfor %}
