@@ -114,7 +114,48 @@ sudo vtysh -c "show bgp ipv4 unicast"             # leaf loopbacks 10.0.0.11-16
 ping -c3 -I lo 10.0.0.11                          # leaf loopback reachable
 
 -------------------------------------------------------------------------------
-Step 3 - Save
+Step 3 - SNMP monitoring (SNMPv2c, read-only)
+-------------------------------------------------------------------------------
+# Lets the Prometheus SNMP exporter on the Kubernetes cluster poll this switch
+# (interface counters etc.). Read-only community, answered only to the management
+# network, on the mgmt VRF (where eth0 lives). SNMPv2c sends the community in
+# clear text - acceptable for this lab, not for production.
+nv set service snmp-server enable on
+nv set service snmp-server listening-address all vrf mgmt
+nv set service snmp-server readonly-community cl-fabric-ro access 192.168.122.0/24
+nv set service snmp-server system-location "GNS3 lab - Multisite VXLAN fabric"
+
+nv config apply -y
+
+# Verify (from this switch / from your workstation)
+nv show service snmp-server
+snmpwalk -v2c -c cl-fabric-ro 192.168.122.32 1.3.6.1.2.1.1.5.0   # sysName = cl-sp-1
+
+-------------------------------------------------------------------------------
+Step 4 - NVUE REST API (read-only, for BGP session monitoring)
+-------------------------------------------------------------------------------
+# SNMP cannot report the BGP sessions here (BGP unnumbered peers are missing from
+# FRR's BGP4-MIB peer table), so the Prometheus JSON exporter reads them from the
+# NVUE REST API instead. Read-only "monitor" user (role nvue-monitor).
+# The hash below is SHA-512 for the lab password in kubernetes/group_vars/all.yml
+# (nvue_api_password) - generate your own with: openssl passwd -6
+nv set system aaa user monitor role nvue-monitor
+nv set system aaa user monitor hashed-password '$6$fabricmon$ZBPcdnLwQSzXlIb8BajMVLICU2Yf4D0ZZg1kHYiCSMt8O4dUjBZMruZlf4EW2p8FyadbWuJDJ9tI1HvIwNj0p/'
+nv set system aaa user monitor enable on
+
+nv config apply -y
+
+# Cumulus 5.4 ships the API's nginx site disabled and bound to localhost. Enable it
+# on all addresses (HTTPS :8765, answers on the mgmt VRF) - OS-level, not NVUE:
+sudo ln -sf /etc/nginx/sites-available/nvue.conf /etc/nginx/sites-enabled/nvue.conf
+sudo sed -i 's/listen localhost:8765 ssl;/listen [::]:8765 ipv6only=off ssl;/' /etc/nginx/sites-available/nvue.conf
+sudo systemctl restart nginx
+
+# Verify (from this switch / from your workstation)
+curl -sk -u monitor:Fabric-Mon-ro1 https://192.168.122.32:8765/nvue_v1/vrf/default/router/bgp/neighbor | head -20
+
+-------------------------------------------------------------------------------
+Step 5 - Save
 -------------------------------------------------------------------------------
 nv config save
 nv config show -o commands                        # full config in set syntax

@@ -48,3 +48,16 @@ nv set vrf default router bgp address-family ipv4-unicast multipaths ebgp {{ bgp
 nv set vrf default router bgp address-family l2vpn-evpn enable on
 
 nv set vrf default router bgp enable on
+
+# SNMPv2c (read-only) on the management VRF for the Prometheus SNMP exporter.
+nv set service snmp-server enable on
+nv set service snmp-server listening-address all vrf mgmt
+nv set service snmp-server readonly-community {{ snmp_community }} access {{ snmp_allowed_prefix }}
+nv set service snmp-server system-location "{{ snmp_location }}"
+
+
+# Read-only user for the NVUE REST API (BGP session monitoring). The nginx site that
+# serves the API is enabled OS-level by the role's tasks, not by NVUE.
+nv set system aaa user {{ nvue_api_user }} role nvue-monitor
+nv set system aaa user {{ nvue_api_user }} hashed-password '{{ nvue_api_hashed_password }}'
+nv set system aaa user {{ nvue_api_user }} enable on
