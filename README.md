@@ -51,6 +51,7 @@ for the fabric. It is built by [kubernetes/site.yml](kubernetes/site.yml):
 | Storage | local-path-provisioner (default StorageClass) |
 | Metrics | metrics-server, kube-prometheus-stack (Prometheus .61, Grafana .60, Alertmanager .62) |
 | Long-term metrics | Grafana Mimir (tenant `infra`, 30d), fed by Prometheus remote_write |
+| Fabric telemetry | SNMPv2c exporter (interfaces, CPU, memory; `--tags snmp`) and NVUE REST API exporter (BGP sessions; `--tags bgp`) polling all 8 Cumulus switches; gNMI streaming (gnmic, `--tags gnmi`) from all 6 Arista switches |
 
 The VM definitions (libvirt XML, netplan example) are in [kubernetes/libvirt/](kubernetes/libvirt/).
 See [kubernetes/README.md](kubernetes/README.md) for prerequisites, run steps and rebuild instructions.

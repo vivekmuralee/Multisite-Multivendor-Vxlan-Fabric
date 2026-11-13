@@ -805,3 +805,133 @@
     - name: Mimir gateway ready
       ansible.builtin.command: kubectl -n {{ mimir_namespace }} run mimir-ready --rm -i --restart=Never --image=curlimages/curl:8.11.1 -- -fsS {{ mimir_gateway }}/ready
       changed_when: false
+
+# ------------------------------------------------------------------ 15. SNMP exporter
+- name: SNMP exporter (Cumulus fabric switches -> Prometheus)
+  hosts: "{{ groups['k8s_masters'][0] }}"
+  tags: [snmp]
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  tasks:
+    - name: Render chart values (contains the SNMP community)
+      ansible.builtin.template:
+        src: templates/snmp-exporter-values.yaml.j2
+        dest: /root/snmp-exporter-values.yaml
+        mode: "0600"
+      no_log: true
+
+    - name: Helm repo
+      ansible.builtin.shell: |
+        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null
+        helm repo update prometheus-community >/dev/null
+      changed_when: false
+
+    - name: helm upgrade --install snmp-exporter
+      ansible.builtin.command: >
+        helm upgrade --install snmp prometheus-community/prometheus-snmp-exporter
+        --namespace {{ monitoring_namespace }}
+        --version {{ snmp_exporter_chart_version }}
+        --values /root/snmp-exporter-values.yaml
+        --wait --timeout 5m
+      changed_when: true
+
+    # Grafana's dashboard sidecar watches every namespace for ConfigMaps labelled
+    # grafana_dashboard=1 and loads them, so the dashboard is code, not a click-ops export.
+    - name: Copy Grafana dashboard JSON
+      ansible.builtin.copy:
+        src: dashboards/cumulus-fabric.json
+        dest: /root/cumulus-fabric-dashboard.json
+        mode: "0600"
+
+    - name: Grafana dashboard ConfigMap (Cumulus VXLAN Fabric)
+      ansible.builtin.shell: |
+        kubectl -n {{ monitoring_namespace }} create configmap cumulus-fabric-dashboard \
+          --from-file=cumulus-fabric.json=/root/cumulus-fabric-dashboard.json \
+          --dry-run=client -o yaml \
+        | kubectl label --local -f - grafana_dashboard=1 -o yaml \
+        | kubectl apply -f -
+      changed_when: true
+
+# ------------------------------------------------------------------ 16. BGP session exporter
+- name: JSON exporter (Cumulus NVUE REST API -> BGP session metrics)
+  hosts: "{{ groups['k8s_masters'][0] }}"
+  tags: [bgp]
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  tasks:
+    - name: Render chart values (contains the NVUE API password)
+      ansible.builtin.template:
+        src: templates/json-exporter-values.yaml.j2
+        dest: /root/json-exporter-values.yaml
+        mode: "0600"
+      no_log: true
+
+    - name: Helm repo
+      ansible.builtin.shell: |
+        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null
+        helm repo update prometheus-community >/dev/null
+      changed_when: false
+
+    - name: helm upgrade --install json-exporter
+      ansible.builtin.command: >
+        helm upgrade --install bgp prometheus-community/prometheus-json-exporter
+        --namespace {{ monitoring_namespace }}
+        --version {{ json_exporter_chart_version }}
+        --values /root/json-exporter-values.yaml
+        --wait --timeout 5m
+      changed_when: true
+
+    # The chart has no config checksum annotation, so a changed module list would not
+    # take effect until the pod restarts.
+    - name: Restart json-exporter to load the new modules
+      ansible.builtin.command: >
+        kubectl -n {{ monitoring_namespace }} rollout restart deployment/bgp-prometheus-json-exporter
+      changed_when: true
+
+    - name: Wait for json-exporter rollout
+      ansible.builtin.command: >
+        kubectl -n {{ monitoring_namespace }} rollout status deployment/bgp-prometheus-json-exporter --timeout=3m
+      changed_when: false
+
+# ------------------------------------------------------------------ 17. gnmic (Arista gNMI telemetry)
+- name: gnmic (Arista fabric gNMI -> Prometheus)
+  hosts: "{{ groups['k8s_masters'][0] }}"
+  tags: [gnmi]
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  tasks:
+    - name: Render gnmic manifests (the Secret contains the switch password)
+      ansible.builtin.template:
+        src: templates/gnmic.yaml.j2
+        dest: /root/gnmic.yaml
+        mode: "0600"
+      no_log: true
+
+    - name: Apply gnmic
+      ansible.builtin.command: kubectl apply -f /root/gnmic.yaml
+      changed_when: true
+
+    # The Secret is mounted as a file, so a changed target list or path set only takes
+    # effect after a restart.
+    - name: Restart gnmic to load the config
+      ansible.builtin.command: kubectl -n {{ monitoring_namespace }} rollout restart deployment/gnmic
+      changed_when: true
+
+    - name: Wait for gnmic rollout
+      ansible.builtin.command: kubectl -n {{ monitoring_namespace }} rollout status deployment/gnmic --timeout=3m
+      changed_when: false
+
+    - name: Copy Grafana dashboard JSON (Arista)
+      ansible.builtin.copy:
+        src: dashboards/arista-fabric.json
+        dest: /root/arista-fabric-dashboard.json
+        mode: "0600"
+
+    - name: Grafana dashboard ConfigMap (Arista fabric)
+      ansible.builtin.shell: |
+        kubectl -n {{ monitoring_namespace }} create configmap arista-fabric-dashboard \
+          --from-file=arista-fabric.json=/root/arista-fabric-dashboard.json \
+          --dry-run=client -o yaml \
+        | kubectl label --local -f - grafana_dashboard=1 -o yaml \
+        | kubectl apply -f -
+      changed_when: true

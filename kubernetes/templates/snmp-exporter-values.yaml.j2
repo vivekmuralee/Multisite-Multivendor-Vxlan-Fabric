@@ -1,0 +1,27 @@
+# prometheus-snmp-exporter values (rendered by Ansible, tag: snmp)
+# "config" replaces the bundled snmp.yml, so the bundled one (all the default modules,
+# e.g. if_mib) is loaded as a second --config.file; the exporter merges the two.
+config: |-
+  auths:
+    cumulus_v2:
+      community: {{ snmp_community }}
+      version: 2
+
+extraArgs:
+  - --config.file=/etc/snmp_exporter/snmp.yml
+
+serviceMonitor:
+  enabled: true
+  namespace: {{ monitoring_namespace }}
+  path: /snmp
+  interval: {{ snmp_scrape_interval }}
+  scrapeTimeout: {{ snmp_scrape_timeout }}
+  module: {{ snmp_modules | to_json }}
+  auth:
+    - cumulus_v2
+  # The chart labels every series with target=<name below> and instance=<switch IP>.
+  params:
+{% for t in snmp_targets %}
+    - name: {{ t.name }}
+      target: {{ t.target }}
+{% endfor %}

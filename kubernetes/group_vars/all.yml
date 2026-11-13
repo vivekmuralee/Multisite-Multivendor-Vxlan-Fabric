@@ -64,3 +64,57 @@ mimir_kafka_storage: 10Gi
 mimir_ingester_storage: 10Gi
 mimir_gateway: "http://mimir-gateway.{{ mimir_namespace }}.svc.cluster.local"
 k8s_cluster_label: kube-lab
+
+# SNMP exporter: polls the Cumulus fabric switches (SNMPv2c, read-only) and exposes
+# the results to Prometheus (and, via remote_write, Mimir). The community string must
+# match cumulus/group_vars/all/vars.yml (snmp_community); the switches only answer
+# sources inside snmp_allowed_prefix (pods leave the node via SNAT, so node IPs match).
+snmp_exporter_chart_version: "9.21.1"     # app v0.31.0
+snmp_community: cl-fabric-ro
+snmp_modules: [if_mib, system, ucd_la_table, ucd_memory, ucd_system_stats]   # interfaces, uptime, load, memory, CPU
+snmp_scrape_interval: 30s
+snmp_scrape_timeout: 20s
+snmp_targets:
+  - { name: cl-sp-1,    target: 192.168.122.32 }
+  - { name: cl-sp-2,    target: 192.168.122.33 }
+  - { name: cl-lf-1,    target: 192.168.122.34 }
+  - { name: cl-lf-2,    target: 192.168.122.35 }
+  - { name: cl-lf-3,    target: 192.168.122.36 }
+  - { name: cl-lf-4,    target: 192.168.122.37 }
+  - { name: cl-bl-lf-1, target: 192.168.122.38 }
+  - { name: cl-bl-lf-2, target: 192.168.122.39 }
+
+# JSON exporter: polls the NVUE REST API on each Cumulus switch (HTTPS :8765, read-only
+# "monitor" user, nvue-monitor role) for BGP session state. SNMP cannot do this: the
+# underlay uses BGP unnumbered and FRR's BGP4-MIB peer table only lists IPv4-addressed peers.
+# Credentials must match cumulus/group_vars/all/vars.yml (nvue_api_*).
+json_exporter_chart_version: "0.20.2"     # app v0.7.0
+nvue_api_user: monitor
+nvue_api_password: Fabric-Mon-ro1
+bgp_scrape_interval: 30s
+bgp_scrape_timeout: 20s
+# vrf_modules: extra VRFs to poll (VRF-lite peers to the PEs live in TENANT_A on the border leafs)
+bgp_targets:
+  - { name: cl-sp-1,    ip: 192.168.122.32 }
+  - { name: cl-sp-2,    ip: 192.168.122.33 }
+  - { name: cl-lf-1,    ip: 192.168.122.34 }
+  - { name: cl-lf-2,    ip: 192.168.122.35 }
+  - { name: cl-lf-3,    ip: 192.168.122.36 }
+  - { name: cl-lf-4,    ip: 192.168.122.37 }
+  - { name: cl-bl-lf-1, ip: 192.168.122.38, tenant_a: true }
+  - { name: cl-bl-lf-2, ip: 192.168.122.39, tenant_a: true }
+
+# gnmic: streams gNMI telemetry from the Arista fabric (OpenConfig paths: interfaces, BGP/EVPN
+# neighbors, CPU/memory) and exposes it as Prometheus metrics on :9804. Credentials must match
+# arista/group_vars/all/vars.yml (gnmi_user / gnmi_hashed_password). Plain gRPC on the mgmt VRF.
+gnmic_image: ghcr.io/openconfig/gnmic:0.49.1
+gnmi_user: monitor
+gnmi_password: Fabric-Mon-ro1
+gnmi_sample_interval: 30s
+gnmi_targets:
+  - { name: arista-sp-1,    address: "192.168.122.24:6030" }
+  - { name: arista-sp-2,    address: "192.168.122.25:6030" }
+  - { name: arista-bl-lf-1, address: "192.168.122.26:6030" }
+  - { name: arista-bl-lf-2, address: "192.168.122.27:6030" }
+  - { name: arista-lf-1,    address: "192.168.122.28:6030" }
+  - { name: arista-lf-2,    address: "192.168.122.29:6030" }

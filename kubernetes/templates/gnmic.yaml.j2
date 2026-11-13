@@ -1,0 +1,112 @@
+# gnmic collector for the Arista fabric (rendered by Ansible, tag: gnmi).
+# The config holds the switch password, so it lives in a Secret.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gnmic-config
+  namespace: {{ monitoring_namespace }}
+type: Opaque
+stringData:
+  gnmic.yaml: |
+    username: {{ gnmi_user }}
+    password: {{ gnmi_password }}
+    insecure: true
+    encoding: json_ietf
+    log: true
+    targets:
+{% for t in gnmi_targets %}
+      {{ t.name }}:
+        address: {{ t.address }}
+{% endfor %}
+    subscriptions:
+      interfaces:
+        mode: stream
+        stream-mode: sample
+        sample-interval: {{ gnmi_sample_interval }}
+        paths:
+          - /interfaces/interface/state/oper-status
+          - /interfaces/interface/state/admin-status
+          # description is a string, so it becomes a label; used to tell cabled ports from spare ones
+          - /interfaces/interface/state/description
+          - /interfaces/interface/state/counters
+      bgp:
+        mode: stream
+        stream-mode: sample
+        sample-interval: {{ gnmi_sample_interval }}
+        paths:
+          - /network-instances/network-instance/protocols/protocol/bgp/neighbors/neighbor/state
+          - /network-instances/network-instance/protocols/protocol/bgp/neighbors/neighbor/afi-safis/afi-safi/state/prefixes
+      system:
+        mode: stream
+        stream-mode: sample
+        sample-interval: {{ gnmi_sample_interval }}
+        paths:
+          - /system/cpus/cpu[index=ALL]/state/idle/instant
+          - /system/memory/state
+    outputs:
+      prom:
+        type: prometheus
+        listen: ":9804"
+        path: /metrics
+        metric-prefix: gnmi
+        strings-as-labels: true
+        expiration: 150s
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gnmic
+  namespace: {{ monitoring_namespace }}
+  labels: { app.kubernetes.io/name: gnmic }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/name: gnmic }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: gnmic }
+    spec:
+      containers:
+        - name: gnmic
+          image: {{ gnmic_image }}
+          args: ["--config", "/etc/gnmic/gnmic.yaml", "subscribe"]
+          ports:
+            - { name: metrics, containerPort: 9804 }
+          readinessProbe:
+            httpGet: { path: /metrics, port: metrics }
+            initialDelaySeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+          volumeMounts:
+            - { name: config, mountPath: /etc/gnmic, readOnly: true }
+      volumes:
+        - name: config
+          secret: { secretName: gnmic-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gnmic
+  namespace: {{ monitoring_namespace }}
+  labels: { app.kubernetes.io/name: gnmic }
+spec:
+  selector: { app.kubernetes.io/name: gnmic }
+  ports:
+    - { name: metrics, port: 9804, targetPort: metrics }
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: gnmic
+  namespace: {{ monitoring_namespace }}
+  labels: { app.kubernetes.io/name: gnmic }
+spec:
+  selector:
+    matchLabels: { app.kubernetes.io/name: gnmic }
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 20s
