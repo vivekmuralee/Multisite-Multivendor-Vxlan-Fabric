@@ -239,3 +239,17 @@ git push origin --delete feature/arista-add-vlan30    # delete it on GitHub (or 
   configs were not captured. Confirm both.
 - Turning on `no bgp default ipv4-unicast` and changing the anycast MAC will
   briefly reset BGP sessions and gateway ARP entries - push in a maintenance window.
+
+## eAPI for the VXLAN dashboard (manual, VTEPs)
+
+The Grafana "Arista VXLAN Statistics" dashboard reads `show vxlan vni` / `show vxlan vtep` over eAPI
+using the same read-only `monitor` user as gNMI:
+
+```
+management api http-commands
+   protocol https
+   no shutdown
+   !
+   vrf mgmt
+      no shutdown
+```
