@@ -1,0 +1,7 @@
+---
+# Collections used by site.yml (already bundled in the repo's pinned ansible==9.2.0).
+# Only needed if you run with ansible-core alone:
+#   ansible-galaxy collection install -r kubernetes/requirements.yml
+collections:
+  - name: ansible.posix        # sysctl
+  - name: community.general    # modprobe

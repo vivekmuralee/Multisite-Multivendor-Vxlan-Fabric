@@ -21,11 +21,27 @@ arista/
 │   └── border_leaf.yml
 ├── host_vars/<host>.yml     # per switch: ASN, router-id, VTEP, uplinks, host ports, WAN
 └── roles/
-    ├── arista_base/         # hostname, Management1, NTP
+    ├── arista_base/         # hostname, Management1, NTP, gNMI telemetry (tag: telemetry)
     ├── arista_underlay/     # loopbacks, p2p links, underlay + EVPN BGP
     ├── arista_overlay/      # VLANs, SVIs, Vxlan1, MAC-VRFs, IP-VRF (leafs)
     └── arista_border_leaf/  # WAN links + VRF-lite eBGP (border leafs)
 ```
+
+## Telemetry (gNMI)
+`ansible-playbook site.yml --tags telemetry` (or `make run VENDOR=arista ARGS="--tags telemetry"`)
+creates a read-only `monitor` user (role `network-operator`) and enables the OpenConfig gNMI
+server on every switch: plain gRPC on port 6030 in the `mgmt` VRF, no TLS (lab). The
+Kubernetes `gnmic` collector (`make run VENDOR=kubernetes ARGS="--tags gnmi"`) streams
+interface state and counters, BGP neighbor and per-address-family prefix counts (underlay and
+EVPN, all VRFs) and CPU/memory from them into Prometheus; the Grafana dashboard
+**Arista VXLAN Fabric** (`http://192.168.122.60/d/arista-fabric`) shows it.
+
+- Check by hand: `show management api gnmi` on a switch, then
+  `gnmic -a <mgmt-ip>:6030 -u monitor -p <pw> --insecure get --path /interfaces/interface[name=Ethernet1]/state`.
+- `gnmi_hashed_password` (vars.yml) must be the SHA-512 hash of `gnmi_password` in
+  `kubernetes/group_vars/all.yml`. Both are lab-grade plain values: vault them for real use.
+- Not available over gNMI on vEOS: counters for `Vlan*` SVIs and `Vxlan1`, so the dashboard has
+  no overlay-traffic panels (unlike the Cumulus one).
 
 ## Common changes
 

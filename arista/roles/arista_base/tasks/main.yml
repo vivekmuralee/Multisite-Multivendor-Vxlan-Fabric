@@ -11,3 +11,11 @@
     src: ntp.j2
     save_when: modified
   tags: [ntp]
+
+# gNMI server + read-only monitoring user for the Kubernetes gnmic collector:
+#   ansible-playbook site.yml --tags telemetry
+- name: Push gNMI telemetry (monitor user + management api gnmi)
+  arista.eos.eos_config:
+    src: telemetry.j2
+    save_when: modified
+  tags: [telemetry]
