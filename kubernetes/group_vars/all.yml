@@ -118,3 +118,17 @@ gnmi_targets:
   - { name: arista-bl-lf-2, address: "192.168.122.27:6030" }
   - { name: arista-lf-1,    address: "192.168.122.28:6030" }
   - { name: arista-lf-2,    address: "192.168.122.29:6030" }
+
+# Arista VXLAN dashboard: eAPI polled by json-exporter (module eos_vxlan). Needs
+# `management api http-commands` (https, vrf mgmt) on the switches; same monitor user as gNMI.
+# Only the VTEPs (leaf / border-leaf) have Vxlan1. VNIs must match arista/group_vars/all/vars.yml.
+arista_eapi_targets:
+  - { name: arista-bl-lf-1, ip: 192.168.122.26 }
+  - { name: arista-bl-lf-2, ip: 192.168.122.27 }
+  - { name: arista-lf-1,    ip: 192.168.122.28 }
+  - { name: arista-lf-2,    ip: 192.168.122.29 }
+arista_l2_vnis:
+  - { vni: 10010, vlan: 10 }
+  - { vni: 10020, vlan: 20 }
+arista_l3_vnis:
+  - { vni: 50000, vrf: PROD }

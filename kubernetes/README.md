@@ -221,3 +221,26 @@ gNMI `Subscribe` stream (sample, 30s) to each of the 6 Arista switches (`gnmi_ta
   switch); CPU, memory, youngest-session age. Port panels only list ports that have a
   description (spare EOS ports are admin-up and would otherwise read as faults).
 - The pod is restarted on every run (the config is a mounted Secret, read only at start).
+
+### Arista VXLAN Statistics dashboard
+
+"Arista VXLAN Statistics" (uid `arista-vxlan`, `dashboards/arista-vxlan.json`,
+http://192.168.122.60/d/arista-vxlan): overview tiles, **L2 VNI** and **L3 VNI** status tables, remote
+VTEPs, EVPN prefixes, an **IP table** of every IPv4 address with its interface state, and Vxlan1/SVI traffic.
+
+- **IP table** comes from gNMI (`ipaddr` subscription in `templates/gnmic.yaml.j2`).
+- **VNI / VTEP data** comes from the switches' eAPI, polled by json-exporter (module `eos_vxlan`, POST
+  `/command-api` with `show vxlan vni` + `show vxlan vtep`), because EOS has no OpenConfig VXLAN model.
+  Targets and the expected VNIs are `arista_eapi_targets`, `arista_l2_vnis`, `arista_l3_vnis` in
+  `group_vars/all.yml`; keep the VNIs in step with `arista/group_vars/all/vars.yml`.
+- **Switch prerequisite (manual, VTEPs):** enable eAPI in the mgmt VRF
+  ```
+  management api http-commands
+     protocol https
+     no shutdown
+     !
+     vrf mgmt
+        no shutdown
+  ```
+- Deploy: `ansible-playbook site.yml --tags gnmi,bgp`. The JSON paths in the `eos_vxlan` module were written
+  from the documented EOS `show vxlan vni | json` layout and are not yet validated against a live switch.

@@ -935,3 +935,18 @@
         | kubectl label --local -f - grafana_dashboard=1 -o yaml \
         | kubectl apply -f -
       changed_when: true
+
+    - name: Copy Grafana dashboard JSON (Arista VXLAN)
+      ansible.builtin.copy:
+        src: dashboards/arista-vxlan.json
+        dest: /root/arista-vxlan-dashboard.json
+        mode: "0600"
+
+    - name: Grafana dashboard ConfigMap (Arista VXLAN)
+      ansible.builtin.shell: |
+        kubectl -n {{ monitoring_namespace }} create configmap arista-vxlan-dashboard \
+          --from-file=arista-vxlan.json=/root/arista-vxlan-dashboard.json \
+          --dry-run=client -o yaml \
+        | kubectl label --local -f - grafana_dashboard=1 -o yaml \
+        | kubectl apply -f -
+      changed_when: true
