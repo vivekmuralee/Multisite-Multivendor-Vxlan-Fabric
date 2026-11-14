@@ -893,6 +893,49 @@
         kubectl -n {{ monitoring_namespace }} rollout status deployment/bgp-prometheus-json-exporter --timeout=3m
       changed_when: false
 
+# ------------------------------------------------------------------ 16b. Internet endpoint probes
+- name: Blackbox exporter (ICMP reachability / latency to public endpoints)
+  hosts: "{{ groups['k8s_masters'][0] }}"
+  tags: [internet]
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  tasks:
+    - name: Render chart values
+      ansible.builtin.template:
+        src: templates/blackbox-exporter-values.yaml.j2
+        dest: /root/blackbox-exporter-values.yaml
+        mode: "0600"
+
+    - name: Helm repo
+      ansible.builtin.shell: |
+        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null
+        helm repo update prometheus-community >/dev/null
+      changed_when: false
+
+    - name: helm upgrade --install blackbox-exporter
+      ansible.builtin.command: >
+        helm upgrade --install internet prometheus-community/prometheus-blackbox-exporter
+        --namespace {{ monitoring_namespace }}
+        --version {{ blackbox_exporter_chart_version }}
+        --values /root/blackbox-exporter-values.yaml
+        --wait --timeout 5m
+      changed_when: true
+
+    - name: Copy Grafana dashboard JSON (Internet endpoints)
+      ansible.builtin.copy:
+        src: dashboards/internet-endpoints.json
+        dest: /root/internet-endpoints-dashboard.json
+        mode: "0600"
+
+    - name: Grafana dashboard ConfigMap (Internet endpoints)
+      ansible.builtin.shell: |
+        kubectl -n {{ monitoring_namespace }} create configmap internet-endpoints-dashboard \
+          --from-file=internet-endpoints.json=/root/internet-endpoints-dashboard.json \
+          --dry-run=client -o yaml \
+        | kubectl label --local -f - grafana_dashboard=1 -o yaml \
+        | kubectl apply -f -
+      changed_when: true
+
 # ------------------------------------------------------------------ 17. gnmic (Arista gNMI telemetry)
 - name: gnmic (Arista fabric gNMI -> Prometheus)
   hosts: "{{ groups['k8s_masters'][0] }}"

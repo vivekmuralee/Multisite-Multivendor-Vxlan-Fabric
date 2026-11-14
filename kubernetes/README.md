@@ -244,3 +244,12 @@ VTEPs, EVPN prefixes, an **IP table** of every IPv4 address with its interface s
   ```
 - Deploy: `ansible-playbook site.yml --tags gnmi,bgp`. The JSON paths in the `eos_vxlan` module were written
   from the documented EOS `show vxlan vni | json` layout and are not yet validated against a live switch.
+
+### Internet endpoint monitoring
+
+`--tags internet` installs prometheus-blackbox-exporter (release `internet`) and the dashboard
+"Internet Endpoints" (uid `internet-endpoints`, http://192.168.122.60/d/internet-endpoints).
+The exporter pings each entry of `internet_targets` in `group_vars/all.yml` (Global 1.1.1.1 and 8.8.8.8, plus EMEA, APAC and Australia resolvers;
+each carries a `region` label) every `internet_scrape_interval` through a ServiceMonitor. The dashboard shows
+reachability, RTT, 24h availability, jitter and loss per endpoint. Add destinations by extending the list
+and re-running the tag. Needs the worker VMs to have internet access (NAT on libvirt `default`).
