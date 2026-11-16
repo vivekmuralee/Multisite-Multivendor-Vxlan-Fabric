@@ -31,3 +31,26 @@
   ansible.builtin.command: nv config apply -y
   when: cumulus_underlay_nvue_diff.stdout | trim | length > 0
   changed_when: true
+
+# NVUE REST API: Cumulus 5.4 ships the API's nginx site disabled and bound to localhost.
+# Serve it on all addresses (HTTPS :8765) so the Kubernetes JSON exporter can read BGP state.
+- name: Enable the NVUE REST API nginx site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/nvue.conf
+    dest: /etc/nginx/sites-enabled/nvue.conf
+    state: link
+  register: cumulus_underlay_api_link
+
+- name: Listen on all addresses (not just localhost)
+  ansible.builtin.replace:
+    path: /etc/nginx/sites-available/nvue.conf
+    regexp: 'listen localhost:8765 ssl;'
+    replace: 'listen [::]:8765 ipv6only=off ssl;'
+  register: cumulus_underlay_api_listen
+
+- name: Restart nginx to serve the API
+  ansible.builtin.systemd:
+    name: nginx
+    state: restarted
+    enabled: true
+  when: cumulus_underlay_api_link.changed or cumulus_underlay_api_listen.changed

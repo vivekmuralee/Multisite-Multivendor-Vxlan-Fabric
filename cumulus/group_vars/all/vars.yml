@@ -46,3 +46,20 @@ anycast_gw_mac: "44:38:39:ff:00:01"
 # EVPN / underlay behaviour
 evpn_advertise_all_vni: true
 bgp_ecmp: 2
+
+# SNMPv2c read-only polling by the Prometheus SNMP exporter on the Kubernetes
+# cluster (kubernetes/, tag "snmp"). Keep snmp_community in sync with
+# kubernetes/group_vars/all.yml. Lab-grade: a v2c community is a shared secret
+# sent in clear text, so it is restricted to snmp_allowed_prefix (the GNS3
+# management / libvirt network the exporter's node IPs live in) and is read-only.
+snmp_community: cl-fabric-ro
+snmp_allowed_prefix: 192.168.122.0/24
+snmp_location: "GNS3 lab - Multisite VXLAN fabric"
+
+# NVUE REST API (HTTPS :8765, read-only "monitor" user). The Prometheus JSON exporter polls
+# it for BGP session state - SNMP cannot, because BGP unnumbered peers are not in the
+# BGP4-MIB peer table. Hash = SHA-512 (openssl passwd -6) of kubernetes/group_vars/all.yml
+# nvue_api_password; lab-grade, vault it for anything real.
+nvue_api_user: monitor
+nvue_api_hashed_password: "$6$fabricmon$ZBPcdnLwQSzXlIb8BajMVLICU2Yf4D0ZZg1kHYiCSMt8O4dUjBZMruZlf4EW2p8FyadbWuJDJ9tI1HvIwNj0p/"
+

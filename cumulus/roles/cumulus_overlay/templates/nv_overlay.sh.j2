@@ -5,6 +5,9 @@
 # apply" task commits this.
 set -e
 
+# Global EVPN switch: without it NVUE never instantiates the VNIs / L3 VNI
+# (zebra shows no VNIs and vxlan99/br_l3vni are not created).
+nv set evpn enable on
 nv set nve vxlan enable on
 nv set nve vxlan source address {{ vtep_ip }}
 
