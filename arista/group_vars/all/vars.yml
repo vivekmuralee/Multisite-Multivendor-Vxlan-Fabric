@@ -55,3 +55,11 @@ l3vni:
 
 # Shared anycast gateway MAC - must be identical on every leaf.
 anycast_gw_mac: "00:1c:73:00:00:99"
+
+# gNMI telemetry (OpenConfig, plain gRPC on the mgmt VRF, port 6030). The Prometheus
+# gnmic collector in the Kubernetes cluster streams interface, BGP/EVPN and CPU/memory
+# state from every switch with this read-only user (role network-operator).
+# Hash = SHA-512 (EOS: "openssl passwd -6") of kubernetes/group_vars/all.yml gnmi_password;
+# lab-grade - vault it for anything real.
+gnmi_user: monitor
+gnmi_hashed_password: "$6$fabricmon$ZBPcdnLwQSzXlIb8BajMVLICU2Yf4D0ZZg1kHYiCSMt8O4dUjBZMruZlf4EW2p8FyadbWuJDJ9tI1HvIwNj0p/"
