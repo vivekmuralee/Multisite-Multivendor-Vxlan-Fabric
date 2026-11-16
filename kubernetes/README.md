@@ -37,9 +37,15 @@ exported definitions are in [libvirt/](libvirt/):
 | File | What |
 |---|---|
 | `libvirt/network.xml` | libvirt network `network` (virbr0, NAT, 192.168.122.0/24, DHCP .128-.240) |
-| `libvirt/kubemaster-{1..3}.xml` | 2 vCPU, 8 GiB, 50 GB qcow2 in `/var/lib/libvirt/images/` |
-| `libvirt/kubeworker-{1..3}.xml` | 8 vCPU, 32 GiB, 50 GB qcow2 |
+| `libvirt/kubemaster-{1..3}.xml` | 2 vCPU, 8 GiB, 50 GB qcow2 in `/mnt/gns3storage/libvirt-images/` |
+| `libvirt/kubeworker-{1..3}.xml` | 8 vCPU, 32 GiB, 200 GB qcow2 (grown online from 50 GB: `virsh blockresize`, then `growpart /dev/vda 3`, `pvresize /dev/vda3`, `lvextend -r -l +100%FREE /dev/ubuntu-vg/ubuntu-lv`) |
 | `libvirt/netplan-50-cloud-init.yaml.example` | static IP per node (.91-.96) |
+
+All six disks live in the libvirt dir pool `kube-nvme1` (`/mnt/gns3storage/libvirt-images/`,
+a dedicated NVMe), not the `default` pool on the root disk. They were moved there one VM at
+a time (masters last, one by one to keep etcd quorum): `virsh shutdown`, then
+`virsh vol-create-from kube-nvme1 <vol.xml> --inputpool default <vm>.qcow2` (sparse copy),
+point the domain's `<source file=...>` at the new path, `virsh define`, `virsh start`.
 
 To rebuild from scratch:
 ```
