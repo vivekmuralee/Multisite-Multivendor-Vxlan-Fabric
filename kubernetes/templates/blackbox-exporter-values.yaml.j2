@@ -1,0 +1,26 @@
+# prometheus-blackbox-exporter values (rendered by Ansible, tag: internet)
+# ICMP echo from the cluster to public endpoints. allowIcmp adds NET_RAW so the pod can send pings.
+allowIcmp: true
+config:
+  modules:
+    icmp:
+      prober: icmp
+      timeout: {{ internet_scrape_timeout }}
+      icmp:
+        preferred_ip_protocol: ip4
+        ip_protocol_fallback: false
+
+serviceMonitor:
+  enabled: true
+  defaults:
+    interval: {{ internet_scrape_interval }}
+    scrapeTimeout: {{ internet_scrape_timeout }}
+  targets:
+{% for t in internet_targets %}
+    - name: {{ t.name }}
+      url: {{ t.address }}
+      module: icmp
+      additionalMetricsRelabels:
+        provider: {{ t.provider }}
+        region: {{ t.region }}
+{% endfor %}

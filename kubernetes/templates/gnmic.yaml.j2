@@ -29,6 +29,13 @@ stringData:
           # description is a string, so it becomes a label; used to tell cabled ports from spare ones
           - /interfaces/interface/state/description
           - /interfaces/interface/state/counters
+      # IPv4 addresses per (sub)interface, for the VXLAN dashboard IP table
+      ipaddr:
+        mode: stream
+        stream-mode: sample
+        sample-interval: {{ gnmi_sample_interval }}
+        paths:
+          - /interfaces/interface/subinterfaces/subinterface/ipv4/addresses/address/state
       bgp:
         mode: stream
         stream-mode: sample

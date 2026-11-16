@@ -45,6 +45,57 @@ configuration:
               ipv4_unicast: '{.address-family.ipv4-unicast.rx-prefix}'
               l2vpn_evpn: '{.address-family.l2vpn-evpn.rx-prefix}'
 {% endfor %}
+      # Arista eAPI (POST /command-api, JSON-RPC). One call returns [show vxlan vni, show vxlan vtep].
+      # json-exporter cannot export map keys as labels, so the known VNIs (group_vars arista_l2_vnis /
+      # arista_l3_vnis) are addressed by path with the VNI as a static label; a VNI that disappears from
+      # the switch simply stops producing eos_vni_*_info, which the dashboard shows as Down.
+      # Paths follow `show vxlan vni | json` on EOS 4.35; validate on a live switch if a panel is empty.
+      eos_vxlan:
+        method: POST
+        headers:
+          Content-Type: application/json
+        body:
+          content: '{"jsonrpc":"2.0","method":"runCmds","id":"1","params":{"version":1,"format":"json","cmds":["show vxlan vni","show vxlan vtep"]}}'
+        http_client_config:
+          tls_config:
+            insecure_skip_verify: true
+          basic_auth:
+            username: {{ gnmi_user }}
+            password: {{ gnmi_password }}
+        metrics:
+{% for v in arista_l2_vnis %}
+          - name: eos_vni_l2
+            type: object
+            help: L2 VNI bound to a VLAN on Vxlan1
+            path: "{.result[0].vxlanIntfs.Vxlan1.vniBindings['{{ v.vni }}']}"
+            labels:
+              vni: '{{ v.vni }}'
+              vlan: '{.vlan}'
+              binding: '{.source}'
+            values:
+              info: 1
+{% endfor %}
+{% for v in arista_l3_vnis %}
+          - name: eos_vni_l3
+            type: object
+            help: L3 VNI bound to a VRF on Vxlan1
+            path: "{.result[0].vxlanIntfs.Vxlan1.vniBindingsToVrf['{{ v.vni }}']}"
+            labels:
+              vni: '{{ v.vni }}'
+              vrf: '{.vrfName}'
+              vlan: '{.vlan}'
+              binding: '{.source}'
+            values:
+              info: 1
+{% endfor %}
+          - name: eos_vtep
+            type: object
+            help: Remote VTEP learned on Vxlan1
+            path: '{.result[1].vteps[*]}'
+            labels:
+              vtep: '{@}'
+            values:
+              info: 1
 
 serviceMonitor:
   enabled: true
@@ -64,4 +115,11 @@ serviceMonitor:
       additionalMetricsRelabels:
         target: {{ t.name }}
 {% endif %}
+{% endfor %}
+{% for t in arista_eapi_targets %}
+    - name: {{ t.name }}-vxlan
+      url: https://{{ t.ip }}/command-api
+      module: eos_vxlan
+      additionalMetricsRelabels:
+        source: {{ t.name }}
 {% endfor %}

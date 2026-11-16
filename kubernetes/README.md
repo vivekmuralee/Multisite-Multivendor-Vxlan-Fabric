@@ -37,9 +37,15 @@ exported definitions are in [libvirt/](libvirt/):
 | File | What |
 |---|---|
 | `libvirt/network.xml` | libvirt network `network` (virbr0, NAT, 192.168.122.0/24, DHCP .128-.240) |
-| `libvirt/kubemaster-{1..3}.xml` | 2 vCPU, 8 GiB, 50 GB qcow2 in `/var/lib/libvirt/images/` |
-| `libvirt/kubeworker-{1..3}.xml` | 8 vCPU, 32 GiB, 50 GB qcow2 |
+| `libvirt/kubemaster-{1..3}.xml` | 2 vCPU, 8 GiB, 50 GB qcow2 in `/mnt/gns3storage/libvirt-images/` |
+| `libvirt/kubeworker-{1..3}.xml` | 8 vCPU, 32 GiB, 200 GB qcow2 (grown online from 50 GB: `virsh blockresize`, then `growpart /dev/vda 3`, `pvresize /dev/vda3`, `lvextend -r -l +100%FREE /dev/ubuntu-vg/ubuntu-lv`) |
 | `libvirt/netplan-50-cloud-init.yaml.example` | static IP per node (.91-.96) |
+
+All six disks live in the libvirt dir pool `kube-nvme1` (`/mnt/gns3storage/libvirt-images/`,
+a dedicated NVMe), not the `default` pool on the root disk. They were moved there one VM at
+a time (masters last, one by one to keep etcd quorum): `virsh shutdown`, then
+`virsh vol-create-from kube-nvme1 <vol.xml> --inputpool default <vm>.qcow2` (sparse copy),
+point the domain's `<source file=...>` at the new path, `virsh define`, `virsh start`.
 
 To rebuild from scratch:
 ```
@@ -221,3 +227,35 @@ gNMI `Subscribe` stream (sample, 30s) to each of the 6 Arista switches (`gnmi_ta
   switch); CPU, memory, youngest-session age. Port panels only list ports that have a
   description (spare EOS ports are admin-up and would otherwise read as faults).
 - The pod is restarted on every run (the config is a mounted Secret, read only at start).
+
+### Arista VXLAN Statistics dashboard
+
+"Arista VXLAN Statistics" (uid `arista-vxlan`, `dashboards/arista-vxlan.json`,
+http://192.168.122.60/d/arista-vxlan): overview tiles, **L2 VNI** and **L3 VNI** status tables, remote
+VTEPs, EVPN prefixes, an **IP table** of every IPv4 address with its interface state, and Vxlan1/SVI traffic.
+
+- **IP table** comes from gNMI (`ipaddr` subscription in `templates/gnmic.yaml.j2`).
+- **VNI / VTEP data** comes from the switches' eAPI, polled by json-exporter (module `eos_vxlan`, POST
+  `/command-api` with `show vxlan vni` + `show vxlan vtep`), because EOS has no OpenConfig VXLAN model.
+  Targets and the expected VNIs are `arista_eapi_targets`, `arista_l2_vnis`, `arista_l3_vnis` in
+  `group_vars/all.yml`; keep the VNIs in step with `arista/group_vars/all/vars.yml`.
+- **Switch prerequisite (manual, VTEPs):** enable eAPI in the mgmt VRF
+  ```
+  management api http-commands
+     protocol https
+     no shutdown
+     !
+     vrf mgmt
+        no shutdown
+  ```
+- Deploy: `ansible-playbook site.yml --tags gnmi,bgp`. The JSON paths in the `eos_vxlan` module were written
+  from the documented EOS `show vxlan vni | json` layout and are not yet validated against a live switch.
+
+### Internet endpoint monitoring
+
+`--tags internet` installs prometheus-blackbox-exporter (release `internet`) and the dashboard
+"Internet Endpoints" (uid `internet-endpoints`, http://192.168.122.60/d/internet-endpoints).
+The exporter pings each entry of `internet_targets` in `group_vars/all.yml` (Global 1.1.1.1 and 8.8.8.8, plus EMEA, APAC and Australia resolvers;
+each carries a `region` label) every `internet_scrape_interval` through a ServiceMonitor. The dashboard shows
+reachability, RTT, 24h availability, jitter and loss per endpoint. Add destinations by extending the list
+and re-running the tag. Needs the worker VMs to have internet access (NAT on libvirt `default`).

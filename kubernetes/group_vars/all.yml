@@ -118,3 +118,35 @@ gnmi_targets:
   - { name: arista-bl-lf-2, address: "192.168.122.27:6030" }
   - { name: arista-lf-1,    address: "192.168.122.28:6030" }
   - { name: arista-lf-2,    address: "192.168.122.29:6030" }
+
+# Arista VXLAN dashboard: eAPI polled by json-exporter (module eos_vxlan). Needs
+# `management api http-commands` (https, vrf mgmt) on the switches; same monitor user as gNMI.
+# Only the VTEPs (leaf / border-leaf) have Vxlan1. VNIs must match arista/group_vars/all/vars.yml.
+arista_eapi_targets:
+  - { name: arista-bl-lf-1, ip: 192.168.122.26 }
+  - { name: arista-bl-lf-2, ip: 192.168.122.27 }
+  - { name: arista-lf-1,    ip: 192.168.122.28 }
+  - { name: arista-lf-2,    ip: 192.168.122.29 }
+arista_l2_vnis:
+  - { vni: 10010, vlan: 10 }
+  - { vni: 10020, vlan: 20 }
+arista_l3_vnis:
+  - { vni: 50000, vrf: PROD }
+
+# Internet endpoint monitoring: prometheus-blackbox-exporter sends ICMP echo from a pod to each
+# target (tag: internet). Add entries to monitor more destinations; the dashboard picks them up.
+blackbox_exporter_chart_version: "9.0.1"
+internet_scrape_interval: 15s
+internet_scrape_timeout: 10s
+internet_targets:
+  - { name: cloudflare-dns,    address: 1.1.1.1,         provider: Cloudflare,       region: Global }
+  - { name: google-dns,        address: 8.8.8.8,         provider: Google,           region: Global }
+  # EMEA
+  - { name: de-as250-dns,      address: 194.150.168.168, provider: AS250-DE,         region: EMEA }
+  - { name: nl-worldns,        address: 80.80.80.80,     provider: Freenom-NL,      region: EMEA }
+  # APAC
+  - { name: sg-singtel-dns,    address: 165.21.83.88,    provider: Singtel-SG,      region: APAC }
+  - { name: kr-kt-dns,         address: 168.126.63.1,    provider: KT-KR,           region: APAC }
+  # Australia
+  - { name: au-telstra-dns,    address: 139.130.4.5,     provider: Telstra,          region: Australia }
+  - { name: au-internode-dns,  address: 192.231.203.132, provider: Internode,        region: Australia }
