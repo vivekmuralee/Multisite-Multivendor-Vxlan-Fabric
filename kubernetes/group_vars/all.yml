@@ -149,3 +149,19 @@ internet_targets:
   # Australia
   - { name: au-telstra-dns,    address: 139.130.4.5,     provider: Telstra,          region: Australia }
   - { name: au-internode-dns,  address: 192.231.203.132, provider: Internode,        region: Australia }
+
+# TACACS+ AAA server (tac_plus-ng, tag: tacacs). No official image exists, so an init
+# container builds it from a pinned upstream commit on the official Debian image (~1 min),
+# and the server runs as nobody from that build. Clients must be in tacacs_clients and use
+# the shared key; key and user passwords are generated into kubernetes/artifacts/ (git-ignored).
+tacacs_namespace: aaa
+tacacs_lb_ip: 192.168.122.63
+tacacs_base_image: "debian:trixie-20261104-slim"
+tacacs_source_commit: cdf4ab87040b2a5ee449584c6d6bfda899a996ae      # tacplus-ng/event-driven-servers, 2026-10-30
+tacacs_source_sha256: e4b7c7c15b48213e8d3049e7e72b845c6c07563099f3eefa4c19fde9ef52ac59
+tacacs_clients:
+  - 192.168.122.0/24          # switch management network
+# priv-lvl 15 = admin (EOS network-admin / Cumulus sudo), 1 = read-only.
+tacacs_users:
+  - { name: netadmin, priv_lvl: 15 }
+  - { name: netops,   priv_lvl: 1 }
