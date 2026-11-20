@@ -248,8 +248,8 @@ VTEPs, EVPN prefixes, an **IP table** of every IPv4 address with its interface s
      vrf mgmt
         no shutdown
   ```
-- Deploy: `ansible-playbook site.yml --tags gnmi,bgp`. The JSON paths in the `eos_vxlan` module were written
-  from the documented EOS `show vxlan vni | json` layout and are not yet validated against a live switch.
+- Deploy: `ansible-playbook site.yml --tags gnmi,bgp`. The JSON paths in the `eos_vxlan` module are validated
+  against vEOS 4.35.1F. Remote VTEPs are read from `interfaces.Vxlan1.vteps` (the top-level `vteps` object is empty).
 
 ### Internet endpoint monitoring
 

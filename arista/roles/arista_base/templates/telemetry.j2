@@ -5,3 +5,13 @@ management api gnmi
    transport grpc default
       vrf {{ mgmt_vrf }}
 !
+{% if device_role in ['leaf'] or 'border_leaf' in group_names %}
+! eAPI (HTTPS, mgmt VRF) - polled by json-exporter for the Arista VXLAN dashboard (VTEPs only)
+management api http-commands
+   protocol https
+   no shutdown
+   !
+   vrf {{ mgmt_vrf }}
+      no shutdown
+!
+{% endif %}

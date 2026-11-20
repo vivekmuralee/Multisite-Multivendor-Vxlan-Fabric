@@ -143,7 +143,6 @@ internet_targets:
   - { name: google-dns,        address: 8.8.8.8,         provider: Google,           region: Global }
   # EMEA
   - { name: de-as250-dns,      address: 194.150.168.168, provider: AS250-DE,         region: EMEA }
-  - { name: nl-worldns,        address: 80.80.80.80,     provider: Freenom-NL,      region: EMEA }
   # APAC
   - { name: sg-singtel-dns,    address: 165.21.83.88,    provider: Singtel-SG,      region: APAC }
   - { name: kr-kt-dns,         address: 168.126.63.1,    provider: KT-KR,           region: APAC }
