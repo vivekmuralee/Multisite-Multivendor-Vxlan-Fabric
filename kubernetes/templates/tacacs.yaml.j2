@@ -1,0 +1,167 @@
+# TACACS+ server (tac_plus-ng), rendered by Ansible (tag: tacacs).
+# The Secret holds the shared key and the SHA-512 crypt hashes of the user passwords.
+{% set tac_cfg %}
+id = spawnd {
+	background = no
+	listen { port = 4949 }
+	spawn {
+		instances min = 1
+		instances max = 8
+	}
+}
+
+id = tac_plus-ng {
+	# PID 1 is tac_plus-ng itself, so its stdout is the container log (kubectl logs).
+	log stdout { destination = /proc/1/fd/1 }
+	access log = stdout
+	authorization log = stdout
+	accounting log = stdout
+
+	host clients {
+{% for c in tacacs_clients %}
+		address = {{ c }}
+{% endfor %}
+		key = "{{ tacacs_key }}"
+	}
+
+{% for lvl in tacacs_users | map(attribute='priv_lvl') | unique %}
+	profile priv{{ lvl }} {
+		script {
+			if (service == shell) {
+				if (cmd == "")
+					set priv-lvl = {{ lvl }}
+				permit
+			}
+		}
+	}
+
+{% endfor %}
+{% for u in tacacs_users %}
+	user {{ u.name }} {
+		password login = crypt {{ tacacs_user_hashes[u.name] }}
+		password pap = login
+		profile = priv{{ u.priv_lvl }}
+	}
+
+{% endfor %}
+}
+{% endset %}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ tacacs_namespace }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tacacs-config
+  namespace: {{ tacacs_namespace }}
+type: Opaque
+stringData:
+  tac_plus-ng.cfg: |
+{{ tac_cfg | indent(4, true) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tacacs-build
+  namespace: {{ tacacs_namespace }}
+data:
+  build.sh: |
+    #!/bin/sh
+    # Build tac_plus-ng from the pinned upstream commit into /opt/tac (shared emptyDir).
+    set -eu
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y -qq --no-install-recommends \
+      build-essential perl ca-certificates curl libpcre2-dev libssl-dev libcrypt-dev >/dev/null
+    cd /tmp
+    curl -fsSL -o src.tar.gz \
+      https://github.com/tacplus-ng/event-driven-servers/archive/{{ tacacs_source_commit }}.tar.gz
+    echo "{{ tacacs_source_sha256 }}  src.tar.gz" | sha256sum -c -
+    tar xzf src.tar.gz
+    cd event-driven-servers-{{ tacacs_source_commit }}
+    ./configure --prefix=/opt/tac tac_plus-ng >/dev/null
+    make -j"$(nproc)" >/dev/null
+    make install >/dev/null
+    /opt/tac/sbin/tac_plus-ng -v
+    /opt/tac/sbin/tac_plus-ng -P /etc/tacacs/tac_plus-ng.cfg
+    echo "build OK, config syntax OK"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tacacs
+  namespace: {{ tacacs_namespace }}
+  labels: { app: tacacs }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: tacacs }
+  template:
+    metadata:
+      labels: { app: tacacs }
+      annotations:
+        # Roll the pod when the config or the pinned build changes.
+        checksum/config: "{{ (tac_cfg ~ tacacs_source_commit ~ tacacs_base_image) | hash('sha256') }}"
+    spec:
+      initContainers:
+        - name: build
+          image: {{ tacacs_base_image }}
+          command: ["/bin/sh", "/build/build.sh"]
+          volumeMounts:
+            - { name: build, mountPath: /build, readOnly: true }
+            - { name: config, mountPath: /etc/tacacs, readOnly: true }
+            - { name: tac, mountPath: /opt/tac }
+          resources:
+            requests: { cpu: 500m, memory: 256Mi }
+            limits: { memory: 1Gi }
+      containers:
+        - name: tac-plus-ng
+          image: {{ tacacs_base_image }}
+          command: ["/opt/tac/sbin/tac_plus-ng", "/etc/tacacs/tac_plus-ng.cfg"]
+          ports:
+            - { name: tacacs, containerPort: 4949, protocol: TCP }
+          securityContext:
+            runAsUser: 65534
+            runAsGroup: 65534
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          readinessProbe:
+            tcpSocket: { port: tacacs }
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: tacacs }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          volumeMounts:
+            - { name: config, mountPath: /etc/tacacs, readOnly: true }
+            - { name: tac, mountPath: /opt/tac, readOnly: true }
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { memory: 128Mi }
+      volumes:
+        - name: build
+          configMap: { name: tacacs-build }
+        - name: config
+          secret: { secretName: tacacs-config }
+        - name: tac
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tacacs
+  namespace: {{ tacacs_namespace }}
+  annotations:
+    metallb.io/loadBalancerIPs: {{ tacacs_lb_ip }}
+spec:
+  type: LoadBalancer
+  # Keep the switch source IP: tac_plus-ng matches clients by address and logs it.
+  externalTrafficPolicy: Local
+  selector: { app: tacacs }
+  ports:
+    - { name: tacacs, port: 49, targetPort: tacacs, protocol: TCP }

@@ -430,6 +430,74 @@ control-plane traffic to the CPU; for data-plane captures use `monitor session` 
 `tcpdump` on a virtual platform. VNI is in the VXLAN header: confirm outer src = local VTEP, outer dst =
 remote VTEP, VNI = 10010 (L2) or 10100 (L3).
 
+### 8.6 Load testing with GNS3 hosts
+
+Generate traffic between real endpoints to prove the fabric forwards under load. The
+switches are vEOS VMs forwarding in software, so treat results as a functional and
+relative check (does it hold, does ECMP spread, does it recover), **not** a hardware
+throughput figure. The ceiling is the workstation CPU, shared with every other VM.
+
+**Endpoints.** The leaf `host_ports` in `host_vars/` already define four:
+
+| Host | Leaf port | VLAN / subnet | Suggested IP |
+|---|---|---|---|
+| PC1 | `arista-lf-1` Ethernet8 | 10 (WEB) `10.10.10.0/24` | `10.10.10.11/24` |
+| PC2 | `arista-lf-1` Ethernet9 | 20 (APP) `10.10.20.0/24` | `10.10.20.11/24` |
+| PC3 | `arista-lf-2` Ethernet8 | 10 (WEB) `10.10.10.0/24` | `10.10.10.12/24` |
+| PC4 | `arista-lf-2` Ethernet9 | 20 (APP) `10.10.20.0/24` | `10.10.20.12/24` |
+
+Default gateway is the anycast `.254` of the host's own subnet. In GNS3 use a Docker
+appliance (for example `gns3/ubuntu`, or Alpine with `apk add iperf3 hping3`) and wire
+each to the port above.
+
+| Test | Pair | Path exercised |
+|---|---|---|
+| L2 (same VNI) | PC1 -> PC3 | VNI 10010, lf-1 -> spines -> lf-2 |
+| L3 (inter-subnet) | PC1 -> PC4 | symmetric IRB, L3 VNI 50000, VRF PROD |
+| Local control | PC1 -> PC2 | same leaf, no VXLAN (baseline) |
+
+**1. Sanity first** (must pass before loading):
+
+```
+ping -c 3 10.10.10.12            # PC1 -> PC3, L2 over VXLAN
+ping -c 3 10.10.20.12            # PC1 -> PC4, L3 over VXLAN
+ping -M do -s 1422 10.10.10.12   # DF-bit set; add -s 8900 to check the jumbo path (fabric MTU is 9214)
+```
+
+**2. Generate load** (receiver `iperf3 -s` on PC3 / PC4):
+
+```
+iperf3 -c 10.10.10.12 -P 4 -t 60            # TCP, 4 parallel streams
+iperf3 -c 10.10.10.12 -u -b 200M -t 60      # UDP at a fixed rate: reports loss and jitter
+iperf3 -c 10.10.20.12 -P 8 -t 60            # inter-subnet (L3 VNI)
+iperf3 -c 10.10.10.12 -P 16 -t 60 -R        # reverse direction
+```
+
+ECMP hashes per flow, so a single stream uses one spine. Use `-P 8` or more, or several
+clients with different source ports, to spread load across both spine uplinks. Raise the
+rate in steps (50M, 100M, 200M, 400M...) and note where loss or jitter starts.
+
+**3. Watch the fabric during the run** (on lf-1, lf-2 and a spine):
+
+```
+show interfaces Ethernet1-2 counters rates      ! both uplinks should carry traffic (ECMP)
+show interfaces Ethernet8 counters rates        ! host-facing port
+show vxlan counters vtep                        ! per-remote-VTEP encap/decap
+show interfaces counters errors
+show processes top once                         ! CPU is the real limit on vEOS
+```
+
+Prometheus / Grafana: the Arista VXLAN Statistics dashboard shows Vxlan1 and SVI traffic.
+
+**4. Failure under load.** Start a 60 s UDP run, then during it shut one uplink
+(`interface Ethernet1`, `shutdown` on lf-1). Expected: traffic shifts to the other
+spine, with a short burst of loss until BFD/BGP converge (`show bfd peers`,
+`show ip bgp summary`). `no shutdown` afterwards and confirm both uplinks carry traffic
+again.
+
+**PASS:** zero loss at moderate rate, loss only past the CPU ceiling, both spine uplinks
+used with 8+ flows, and recovery after the link failure without manual action.
+
 ## 9. Spine-specific checks
 
 Spines hold no VNI/VXLAN state; they only relay EVPN routes. They need

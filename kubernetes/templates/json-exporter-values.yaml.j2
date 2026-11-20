@@ -91,7 +91,7 @@ configuration:
           - name: eos_vtep
             type: object
             help: Remote VTEP learned on Vxlan1
-            path: '{.result[1].vteps[*]}'
+            path: '{.result[1].interfaces.Vxlan1.vteps[*]}'
             labels:
               vtep: '{@}'
             values:

@@ -993,3 +993,60 @@
         | kubectl label --local -f - grafana_dashboard=1 -o yaml \
         | kubectl apply -f -
       changed_when: true
+
+- name: TACACS+ AAA server (tac_plus-ng)
+  hosts: "{{ groups['k8s_masters'][0] }}"
+  tags: [tacacs]
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  vars:
+    # Generated once and kept in kubernetes/artifacts/ (git-ignored); reruns reuse them.
+    tacacs_key: "{{ lookup('ansible.builtin.password', playbook_dir + '/artifacts/tacacs-key', length=32, chars=['ascii_letters', 'digits']) }}"
+  tasks:
+    # SHA-512 crypt hashes, computed on the master (the controller's Python has no crypt).
+    # The salt is stored too, so the hash - and therefore the pod - only changes with the password.
+    - name: Hash TACACS+ user passwords
+      ansible.builtin.command:
+        cmd: openssl passwd -6 -salt {{ salt }} -stdin
+        stdin: "{{ lookup('ansible.builtin.password', playbook_dir + '/artifacts/tacacs-' + item.name + '-password', length=20, chars=['ascii_letters', 'digits']) }}"
+      vars:
+        salt: "{{ lookup('ansible.builtin.password', playbook_dir + '/artifacts/tacacs-' + item.name + '-salt', length=16, chars=['ascii_letters', 'digits']) }}"
+      loop: "{{ tacacs_users }}"
+      loop_control: { label: "{{ item.name }}" }
+      register: tacacs_hash
+      changed_when: false
+      no_log: true
+
+    - name: Collect the hashes
+      ansible.builtin.set_fact:
+        tacacs_user_hashes: "{{ dict(tacacs_hash.results | map(attribute='item.name') | zip(tacacs_hash.results | map(attribute='stdout'))) }}"
+      no_log: true
+
+    - name: Render TACACS+ manifests (the Secret contains the shared key and password hashes)
+      ansible.builtin.template:
+        src: templates/tacacs.yaml.j2
+        dest: /root/tacacs.yaml
+        mode: "0600"
+      no_log: true
+
+    - name: Apply TACACS+
+      ansible.builtin.command: kubectl apply -f /root/tacacs.yaml
+      register: tacacs_apply
+      # A Secret with stringData always reports "configured"; real config changes still
+      # show up as a changed Deployment (checksum annotation), which rolls the pod.
+      changed_when: >-
+        tacacs_apply.stdout_lines | reject('search', ' unchanged$')
+        | reject('search', '^secret/tacacs-config configured$') | list | length > 0
+
+    # First start includes the from-source build in the init container (~1-2 min).
+    - name: Wait for TACACS+ rollout
+      ansible.builtin.command: kubectl -n {{ tacacs_namespace }} rollout status deployment/tacacs --timeout=8m
+      changed_when: false
+
+    - name: TACACS+ service address
+      ansible.builtin.command: >-
+        kubectl -n {{ tacacs_namespace }} get svc tacacs
+        -o jsonpath={.status.loadBalancer.ingress[0].ip}
+      register: tacacs_svc_ip
+      changed_when: false
+      failed_when: tacacs_svc_ip.stdout != tacacs_lb_ip

@@ -256,10 +256,10 @@ git push origin --delete feature/arista-add-vlan30    # delete it on GitHub (or 
 - Turning on `no bgp default ipv4-unicast` and changing the anycast MAC will
   briefly reset BGP sessions and gateway ARP entries - push in a maintenance window.
 
-## eAPI for the VXLAN dashboard (manual, VTEPs)
+## eAPI for the VXLAN dashboard (VTEPs)
 
 The Grafana "Arista VXLAN Statistics" dashboard reads `show vxlan vni` / `show vxlan vtep` over eAPI
-using the same read-only `monitor` user as gNMI:
+using the same read-only `monitor` user as gNMI. `ansible-playbook site.yml --tags telemetry` now configures it on the leafs and border leafs; the equivalent EOS config is:
 
 ```
 management api http-commands

@@ -62,7 +62,7 @@ The playbook's first play then gives each clone a unique machine-id and SSH host
 ## Run
 ```
 make run VENDOR=kubernetes                      # everything
-make run VENDOR=kubernetes ARGS="--tags prep"   # identity|prep|kubevip|init|join|cni|metallb|kubelet|metrics|disk|cpmetrics|storage|monitoring|mimir|snmp|bgp|gnmi
+make run VENDOR=kubernetes ARGS="--tags prep"   # identity|prep|kubevip|init|join|cni|metallb|kubelet|metrics|disk|cpmetrics|storage|monitoring|mimir|snmp|bgp|gnmi|internet|tacacs
 ```
 The first play regenerates `/etc/machine-id` and SSH host keys once (the VMs are clones)
 and reboots each node; a marker in `/etc/k8s-node-identity-regenerated` prevents repeats.
@@ -248,8 +248,8 @@ VTEPs, EVPN prefixes, an **IP table** of every IPv4 address with its interface s
      vrf mgmt
         no shutdown
   ```
-- Deploy: `ansible-playbook site.yml --tags gnmi,bgp`. The JSON paths in the `eos_vxlan` module were written
-  from the documented EOS `show vxlan vni | json` layout and are not yet validated against a live switch.
+- Deploy: `ansible-playbook site.yml --tags gnmi,bgp`. The JSON paths in the `eos_vxlan` module are validated
+  against vEOS 4.35.1F. Remote VTEPs are read from `interfaces.Vxlan1.vteps` (the top-level `vteps` object is empty).
 
 ### Internet endpoint monitoring
 
@@ -259,3 +259,59 @@ The exporter pings each entry of `internet_targets` in `group_vars/all.yml` (Glo
 each carries a `region` label) every `internet_scrape_interval` through a ServiceMonitor. The dashboard shows
 reachability, RTT, 24h availability, jitter and loss per endpoint. Add destinations by extending the list
 and re-running the tag. Needs the worker VMs to have internet access (NAT on libvirt `default`).
+
+## TACACS+ AAA server (tac_plus-ng)
+
+`--tags tacacs` runs [tac_plus-ng](https://github.com/tacplus-ng/event-driven-servers) in namespace
+`aaa`, reachable at **192.168.122.63:49** (MetalLB `tacacs_lb_ip`). There is no official image, so the
+pod's init container builds it from a pinned upstream commit (`tacacs_source_commit`, tarball checked
+against `tacacs_source_sha256`) on the official `debian:trixie-*-slim` image. That takes about a minute
+on every pod start. The server then runs from that build as `nobody`, with a read-only root
+filesystem and no capabilities.
+
+- **Clients:** any address in `tacacs_clients` (default `192.168.122.0/24`) with the shared key. The
+  Service uses `externalTrafficPolicy: Local`, so the server sees and logs the real switch IP.
+- **Users** (`tacacs_users`): `netadmin` (priv-lvl 15) and `netops` (priv-lvl 1). Add users by
+  extending the list and re-running the tag.
+- **Secrets:** the shared key and each user's password are generated on the first run into
+  `kubernetes/artifacts/` (git-ignored): `tacacs-key`, `tacacs-<user>-password`. The cluster only gets
+  SHA-512 crypt hashes, in Secret `aaa/tacacs-config`. Delete an artifact file and re-run the tag to
+  rotate it.
+- **Logs:** every login, authorization and accounting record goes to the pod log:
+  `kubectl -n aaa logs deploy/tacacs -c tac-plus-ng`. The build log is in container `build`.
+- **Test from the workstation** (`pip install tacacs_plus`):
+  ```
+  tacacs_client -v -H 192.168.122.63 -k "$(cat kubernetes/artifacts/tacacs-key)" \
+    -u netadmin authenticate -p "$(cat kubernetes/artifacts/tacacs-netadmin-password)"
+  tacacs_client -v -H 192.168.122.63 -k "$(cat kubernetes/artifacts/tacacs-key)" \
+    -u netadmin authorize -c service=shell cmd=        # expect priv-lvl=15
+  ```
+
+### Pointing the switches at it (not applied by the playbooks)
+
+Keep `local` as the fallback method, so the switches' local accounts still work if the server is unreachable.
+Test from a second session before closing the one you configure from.
+
+Arista EOS (mgmt VRF):
+```
+tacacs-server host 192.168.122.63 vrf mgmt key 0 <tacacs-key>
+ip tacacs vrf mgmt source-interface Management1
+aaa group server tacacs+ TACACS
+   server 192.168.122.63 vrf mgmt
+aaa authentication login default group TACACS local
+aaa authorization exec default group TACACS local
+aaa accounting commands all default start-stop group TACACS
+```
+`priv-lvl` 15 gives privilege 15. Check the role EOS assigns to the priv-lvl 1 user with `show aaa`
+before you rely on it as read-only.
+
+Cumulus Linux 5.x (NVUE; check the command names against your release):
+```
+nv set system aaa tacacs server 1 host 192.168.122.63
+nv set system aaa tacacs server 1 secret <tacacs-key>
+nv set system aaa tacacs vrf mgmt
+nv set system aaa tacacs enable on
+nv config apply
+```
+Cumulus maps priv-lvl 15 to the `tacacs15` account (sudo) and lower levels to `tacacs0`/`tacacs1`.
+
