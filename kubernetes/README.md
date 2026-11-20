@@ -271,8 +271,12 @@ filesystem and no capabilities.
 
 - **Clients:** any address in `tacacs_clients` (default `192.168.122.0/24`) with the shared key. The
   Service uses `externalTrafficPolicy: Local`, so the server sees and logs the real switch IP.
-- **Users** (`tacacs_users`): `netadmin` (priv-lvl 15) and `netops` (priv-lvl 1). Add users by
-  extending the list and re-running the tag.
+- **Users** (`tacacs_users`): `netadmin` (priv-lvl 15) and `netops` (priv-lvl 1), plus mirrors of the
+  Arista local service accounts `admin` (Ansible, 15) and `monitor` (gNMI/eAPI, 1). The mirrors reuse
+  the switches' SHA-512 hashes, so with `group TACACS local` they keep working while the server is up.
+  EOS only falls back to local when the server is unreachable, not when it rejects a user. Add users
+  by extending the list and re-running the tag. If you change the admin or monitor password on the
+  switches, update the `crypt` hash here too.
 - **Secrets:** the shared key and each user's password are generated on the first run into
   `kubernetes/artifacts/` (git-ignored): `tacacs-key`, `tacacs-<user>-password`. The cluster only gets
   SHA-512 crypt hashes, in Secret `aaa/tacacs-config`. Delete an artifact file and re-run the tag to
@@ -290,6 +294,7 @@ filesystem and no capabilities.
 ### Pointing the switches at it (not applied by the playbooks)
 
 Keep `local` as the fallback method, so the switches' local accounts still work if the server is unreachable.
+Ready-to-paste Arista samples with a safe apply/rollback procedure: `arista/samples/*_tacacs_sample_config.txt`.
 Test from a second session before closing the one you configure from.
 
 Arista EOS (mgmt VRF):

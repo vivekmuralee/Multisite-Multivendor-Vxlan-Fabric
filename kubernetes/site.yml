@@ -1011,7 +1011,7 @@
         stdin: "{{ lookup('ansible.builtin.password', playbook_dir + '/artifacts/tacacs-' + item.name + '-password', length=20, chars=['ascii_letters', 'digits']) }}"
       vars:
         salt: "{{ lookup('ansible.builtin.password', playbook_dir + '/artifacts/tacacs-' + item.name + '-salt', length=16, chars=['ascii_letters', 'digits']) }}"
-      loop: "{{ tacacs_users }}"
+      loop: "{{ tacacs_users | rejectattr('crypt', 'defined') | list }}"
       loop_control: { label: "{{ item.name }}" }
       register: tacacs_hash
       changed_when: false

@@ -38,7 +38,7 @@ id = tac_plus-ng {
 {% endfor %}
 {% for u in tacacs_users %}
 	user {{ u.name }} {
-		password login = crypt {{ tacacs_user_hashes[u.name] }}
+		password login = crypt {{ u.crypt if u.crypt is defined else tacacs_user_hashes[u.name] }}
 		password pap = login
 		profile = priv{{ u.priv_lvl }}
 	}

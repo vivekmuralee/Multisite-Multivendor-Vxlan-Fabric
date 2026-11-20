@@ -1,0 +1,54 @@
+! TACACS+ client configuration - arista-bl-lf-1 (Management1 192.168.122.26/24, vrf mgmt)
+! Server: tac_plus-ng on the Kubernetes cluster, 192.168.122.63:49 (kubernetes/README.md, --tags tacacs)
+!
+! NOT applied by Ansible. Before pasting:
+!   * Replace <TACACS_KEY> with the contents of kubernetes/artifacts/tacacs-key (git-ignored).
+!   * Apply in a config session with an auto-rollback timer (see the bottom of this file).
+!
+! Method order: TACACS first, local as the fallback. EOS uses the local accounts only when the
+! TACACS server cannot be reached (down, timeout, no path); a user the server REJECTS is not
+! retried locally. The console always uses local.
+! The server therefore also knows the switch service accounts, with the same password hashes,
+! so they behave the same whether the server is up or down:
+!   admin    (Ansible, priv-lvl 15)        monitor  (gNMI / eAPI telemetry, priv-lvl 1)
+! TACACS-only users: netadmin (priv-lvl 15, lands in privileged exec) and netops (priv-lvl 1,
+! unprivileged exec, cannot enable).
+!
+tacacs-server timeout 5
+tacacs-server host 192.168.122.63 vrf mgmt key 0 <TACACS_KEY>
+!
+ip tacacs vrf mgmt source-interface Management1
+!
+aaa group server tacacs+ TACACS
+   server 192.168.122.63 vrf mgmt
+!
+aaa authentication login default group TACACS local
+aaa authentication login console local
+aaa authentication enable default group TACACS local
+aaa authorization exec default group TACACS local
+aaa accounting exec default start-stop group TACACS
+aaa accounting commands all default start-stop group TACACS
+!
+! ---------------------------------------------------------------------------------------
+! Apply safely (rolls back by itself unless confirmed within 5 minutes):
+!
+!   configure session tacacs
+!   <paste the lines above, with the real key>
+!   show session-config diffs
+!   commit timer 00:05:00
+!
+! From a SECOND ssh session, before the timer runs out, test:
+!   ssh netadmin@192.168.122.26     -> privileged prompt (#)
+!   ssh netops@192.168.122.26       -> unprivileged prompt (>), "enable" is refused
+!   ssh admin@192.168.122.26        -> works (now checked by the server; see its log)
+!   show tacacs                 ! server 192.168.122.63, connections / packets counters rise
+!   show aaa sessions
+! Server side: kubectl -n aaa logs deploy/tacacs -c tac-plus-ng   (shows 192.168.122.26)
+! Telemetry (monitor user over gNMI/eAPI): Prometheus targets gnmic and eos_vxlan stay "up"
+! Fallback: scale the server down (kubectl -n aaa scale deploy/tacacs --replicas=0), wait
+!   ~10 s, then ssh admin@192.168.122.26 -> still works via local (expect a ~5 s delay, the timeout);
+!   netadmin/netops are refused (no local account). Scale back to 1 afterwards.
+!
+! All good:   configure session tacacs commit        (makes it permanent)
+!             write memory
+! Not good:   do nothing - it rolls back at the timer - or: configure session tacacs abort
