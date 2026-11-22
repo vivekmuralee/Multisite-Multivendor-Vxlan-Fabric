@@ -63,3 +63,13 @@ anycast_gw_mac: "00:1c:73:00:00:99"
 # lab-grade - vault it for anything real.
 gnmi_user: monitor
 gnmi_hashed_password: "$6$fabricmon$ZBPcdnLwQSzXlIb8BajMVLICU2Yf4D0ZZg1kHYiCSMt8O4dUjBZMruZlf4EW2p8FyadbWuJDJ9tI1HvIwNj0p/"
+
+# Banners (arista_base role, tag: banner). The MOTD is rendered per switch from
+# roles/arista_base/templates/motd.j2 (hostname, role, mgmt IP, ASN, VTEP).
+banner_site_name: Multisite VXLAN EVPN fabric (lab)
+# TACACS+ server named in the MOTD. TACACS itself is configured by hand
+# (arista/samples/) - this only feeds the banner text.
+tacacs_server: 192.168.122.63
+# Optional pre-login warning ("banner login"), shown before the password prompt.
+# Leave empty to skip it.
+banner_login: "Authorized access only. Activity on this device is monitored and logged."

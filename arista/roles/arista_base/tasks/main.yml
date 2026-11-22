@@ -19,3 +19,31 @@
     src: telemetry.j2
     save_when: modified
   tags: [telemetry]
+
+# Post-login MOTD (and optional pre-login warning) on every switch:
+#   ansible-playbook site.yml --tags banner
+# eos_banner handles the multiline "banner motd ... EOF" block and only
+# changes the device when the text differs from "show banner motd".
+- name: Push MOTD banner
+  arista.eos.eos_banner:
+    banner: motd
+    text: "{{ lookup('ansible.builtin.template', 'motd.j2') }}"
+    state: present
+  register: motd_result
+  tags: [banner]
+
+- name: Push login banner (pre-login warning)
+  arista.eos.eos_banner:
+    banner: login
+    text: "{{ banner_login }}"
+    state: present
+  register: login_banner_result
+  when: banner_login | default('') | length > 0
+  tags: [banner]
+
+# eos_banner does not write memory - save only if a banner changed.
+- name: Save config after banner change
+  arista.eos.eos_config:
+    save_when: modified
+  when: (motd_result is changed) or (login_banner_result is changed)
+  tags: [banner]

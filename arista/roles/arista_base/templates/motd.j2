@@ -1,0 +1,16 @@
+{#- MOTD banner text only - the arista_base role pushes it with arista.eos.eos_banner,
+    which adds the "banner motd" / "EOF" wrapper itself. Do not put "!" lines here:
+    everything in this file becomes banner text. -#}
+{%- set role_label = {'spine': 'Spine', 'leaf': 'Leaf', 'border_leaf': 'Border leaf'}[device_role] | default(device_role) -%}
+================================================================================
+  {{ inventory_hostname }}  |  {{ role_label }}  |  {{ banner_site_name }}
+  Mgmt: {{ ansible_host }} (vrf {{ mgmt_vrf }})  |  ASN {{ router_asn }}{% if vtep_ip is defined %}  |  VTEP {{ vtep_ip }}{% endif %}
+
+--------------------------------------------------------------------------------
+{% if tacacs_server is defined %}
+  Logins are authenticated via TACACS+ ({{ tacacs_server }}), local as fallback.
+  All commands are logged.
+{% endif %}
+  Config is managed by Ansible (arista/site.yml) - avoid manual changes;
+  use "configure session" + "commit timer" for any hand edits.
+================================================================================
