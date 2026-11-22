@@ -10,7 +10,7 @@
 #   ansible-playbook site.yml --limit spine          # underlay only, spines
 #   ansible-playbook site.yml --tags cleanup         # one-off stale-config removal
 #
-# Run one section only with its tag: base, ntp, underlay, overlay, border
+# Run one section only with its tag: base, ntp, dns, banner, underlay, overlay, border
 #   ansible-playbook site.yml --tags ntp --limit leaf
 
 - name: Configure base - hostname, management, NTP (all fabric switches)

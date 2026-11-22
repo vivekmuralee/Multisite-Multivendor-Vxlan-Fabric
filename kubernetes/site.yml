@@ -1050,3 +1050,75 @@
       register: tacacs_svc_ip
       changed_when: false
       failed_when: tacacs_svc_ip.stdout != tacacs_lb_ip
+
+- name: Fabric DNS (CoreDNS) and NTP (chrony) for switches and routers
+  hosts: "{{ groups['k8s_masters'][0] }}"
+  tags: [netsvc]
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  tasks:
+    - name: Render DNS + NTP manifests
+      ansible.builtin.template:
+        src: templates/netsvc.yaml.j2
+        dest: /root/netsvc.yaml
+        mode: "0644"
+
+    - name: Apply DNS + NTP
+      ansible.builtin.command: kubectl apply -f /root/netsvc.yaml
+      register: netsvc_apply
+      changed_when: netsvc_apply.stdout_lines | reject('search', ' unchanged$') | list | length > 0
+
+    - name: Wait for DNS + NTP rollout
+      ansible.builtin.command: kubectl -n {{ netsvc_namespace }} rollout status deployment/{{ item }} --timeout=5m
+      loop: [dns, ntp]
+      changed_when: false
+
+    - name: Service addresses
+      ansible.builtin.command: >-
+        kubectl -n {{ netsvc_namespace }} get svc {{ item.svc }}
+        -o jsonpath={.status.loadBalancer.ingress[0].ip}
+      loop:
+        - { svc: dns, ip: "{{ dns_lb_ip }}" }
+        - { svc: ntp, ip: "{{ ntp_lb_ip }}" }
+      loop_control: { label: "{{ item.svc }}" }
+      register: netsvc_ip
+      changed_when: false
+      failed_when: netsvc_ip.stdout != item.ip
+
+    # End-to-end through the LoadBalancer IPs: local A + PTR, a forwarded name, and an NTP query.
+    - name: DNS answers the local zone (A, PTR, NXDOMAIN) and forwarded names
+      ansible.builtin.shell: |
+        set -e
+        test "$(dig +short +time=3 @{{ dns_lb_ip }} dns.{{ dns_domain }})" = "{{ dns_lb_ip }}"
+        test "$(dig +short +time=3 @{{ dns_lb_ip }} -x {{ ntp_lb_ip }})" = "ntp.{{ dns_domain }}."
+        dig +time=3 @{{ dns_lb_ip }} no-such-host.{{ dns_domain }} | grep -q 'status: NXDOMAIN'
+        test -n "$(dig +short +time=3 @{{ dns_lb_ip }} kubernetes.io A)"
+      changed_when: false
+      retries: 6
+      delay: 5
+      register: dns_check
+      until: dns_check.rc == 0
+
+    # chronyd -Q only measures the offset; it never sets the clock or touches the node's chronyd.
+    - name: NTP server answers
+      ansible.builtin.command: chronyd -Q -t 20 "server {{ ntp_lb_ip }} iburst maxsamples 1"
+      register: ntp_check
+      changed_when: false
+      retries: 3
+      delay: 10
+      until: ntp_check.rc == 0 and 'System clock wrong by' in ntp_check.stderr ~ ntp_check.stdout
+
+    - name: Both NTP pods are synced to an upstream source
+      ansible.builtin.shell: |
+        set -e
+        for p in $(kubectl -n {{ netsvc_namespace }} get pod -l app=ntp -o name); do
+          kubectl -n {{ netsvc_namespace }} exec "$p" -- chronyc -n tracking | grep -E '^(Reference ID|Stratum)' | tr '\n' ' '
+          echo
+        done
+      register: ntp_tracking
+      changed_when: false
+      failed_when: ntp_tracking.rc != 0 or '7F7F0101' in ntp_tracking.stdout
+
+    - name: NTP offset of this node against the fabric NTP service
+      ansible.builtin.debug:
+        msg: "{{ (ntp_check.stderr_lines + ntp_check.stdout_lines) | select('search', 'System clock wrong by') | list }}"

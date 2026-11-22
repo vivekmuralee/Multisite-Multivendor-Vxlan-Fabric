@@ -55,6 +55,32 @@ nv set service snmp-server listening-address all vrf mgmt
 nv set service snmp-server readonly-community {{ snmp_community }} access {{ snmp_allowed_prefix }}
 nv set service snmp-server system-location "{{ snmp_location }}"
 
+# Fabric NTP + DNS: chrony / CoreDNS on the Kubernetes cluster (kubernetes/, tag "netsvc").
+# NVUE 5.4 has no DNS search-domain setting: use full names (cl-lf-1.lab.internal).
+nv set service ntp mgmt server {{ ntp_server }} iburst on
+nv set service dns mgmt server {{ dns_server }}
+
+# Banners. pre-login -> /etc/issue.net (sshd Banner), post-login -> /etc/motd.
+# nv set rejects newlines in a value, so the multi-line MOTD goes in with nv config patch.
+nv set system message pre-login "{{ banner_login }}"
+{% set role_label = 'Spine' if 'spine' in group_names else ('Border leaf' if 'border_leaf' in group_names else 'Leaf') %}
+cat > /tmp/nv_motd.yaml <<'MOTD'
+- set:
+    system:
+      message:
+        post-login: |
+          ================================================================================
+            {{ inventory_hostname }}  |  {{ role_label }}  |  {{ banner_site_name }}
+            Mgmt: {{ ansible_host }} (vrf mgmt)  |  ASN {{ router_asn }}{% if vtep_ip is defined %}  |  VTEP {{ vtep_ip }}{% endif %}
+
+          --------------------------------------------------------------------------------
+            Config is applied by hand with NVUE (cumulus/samples/): stage with nv set,
+            review with "nv config diff", then "nv config apply".
+          ================================================================================
+MOTD
+nv config patch /tmp/nv_motd.yaml
+rm -f /tmp/nv_motd.yaml
+
 
 # Read-only user for the NVUE REST API (BGP session monitoring). The nginx site that
 # serves the API is enabled OS-level by the role's tasks, not by NVUE.

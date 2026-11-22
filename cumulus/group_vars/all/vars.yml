@@ -63,3 +63,11 @@ snmp_location: "GNS3 lab - Multisite VXLAN fabric"
 nvue_api_user: monitor
 nvue_api_hashed_password: "$6$fabricmon$ZBPcdnLwQSzXlIb8BajMVLICU2Yf4D0ZZg1kHYiCSMt8O4dUjBZMruZlf4EW2p8FyadbWuJDJ9tI1HvIwNj0p/"
 
+# Fabric NTP + DNS on the Kubernetes cluster (kubernetes/, tag "netsvc"), reached via vrf mgmt.
+ntp_server: 192.168.122.65
+dns_server: 192.168.122.64
+
+# Banners (same text as the Arista fabric). post-login MOTD is rendered per switch in
+# roles/cumulus_underlay/templates/nv_underlay.sh.j2.
+banner_site_name: Multisite VXLAN EVPN fabric (lab)
+banner_login: "Authorized access only. Activity on this device is monitored and logged."

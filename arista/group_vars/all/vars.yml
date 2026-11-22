@@ -20,10 +20,17 @@ mgmt_prefixlen: 24
 mgmt_gateway: 192.168.122.1
 timezone: US/Pacific
 
-# 8.8.8.8 is Google DNS, not NTP. 216.239.35.0 is time.google.com.
+# Fabric NTP service on the Kubernetes cluster (chrony, kubernetes/ --tags netsvc), which syncs
+# to time.cloudflare.com / pool.ntp.org. eos_config only adds lines: remove the previous public
+# servers (216.239.35.0, 216.40.34.37) by hand, see samples/arista_dns_ntp_sample_config.txt.
 ntp_servers:
-  - 216.239.35.0
-  - 216.40.34.37
+  - 192.168.122.65
+
+# Fabric DNS (CoreDNS on the Kubernetes cluster, same service as ntp_servers above).
+# Unqualified names (ping vrf mgmt cl-lf-1) get dns_domain appended.
+dns_servers:
+  - 192.168.122.64
+dns_domain: lab.internal
 
 fabric_mtu: 9214
 
@@ -63,3 +70,13 @@ anycast_gw_mac: "00:1c:73:00:00:99"
 # lab-grade - vault it for anything real.
 gnmi_user: monitor
 gnmi_hashed_password: "$6$fabricmon$ZBPcdnLwQSzXlIb8BajMVLICU2Yf4D0ZZg1kHYiCSMt8O4dUjBZMruZlf4EW2p8FyadbWuJDJ9tI1HvIwNj0p/"
+
+# Banners (arista_base role, tag: banner). The MOTD is rendered per switch from
+# roles/arista_base/templates/motd.j2 (hostname, role, mgmt IP, ASN, VTEP).
+banner_site_name: Multisite VXLAN EVPN fabric (lab)
+# TACACS+ server named in the MOTD. TACACS itself is configured by hand
+# (arista/samples/) - this only feeds the banner text.
+tacacs_server: 192.168.122.63
+# Optional pre-login warning ("banner login"), shown before the password prompt.
+# Leave empty to skip it.
+banner_login: "Authorized access only. Activity on this device is monitored and logged."

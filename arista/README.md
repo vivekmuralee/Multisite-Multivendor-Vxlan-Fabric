@@ -21,7 +21,7 @@ arista/
 │   └── border_leaf.yml
 ├── host_vars/<host>.yml     # per switch: ASN, router-id, VTEP, uplinks, host ports, WAN
 └── roles/
-    ├── arista_base/         # hostname, Management1, NTP, gNMI telemetry (tag: telemetry)
+    ├── arista_base/         # hostname, Management1, NTP, banners (tag: banner), gNMI telemetry (tag: telemetry)
     ├── arista_underlay/     # loopbacks, p2p links, underlay + EVPN BGP
     ├── arista_overlay/      # VLANs, SVIs, Vxlan1, MAC-VRFs, IP-VRF (leafs)
     └── arista_border_leaf/  # WAN links + VRF-lite eBGP (border leafs)
@@ -142,6 +142,7 @@ the config instead of the whole of `site.yml`:
 | Tag | Pushes |
 |---|---|
 | `ntp` | NTP servers (`ntp_servers`) |
+| `banner` | MOTD (`motd.j2`) + optional login banner (`banner_login`) |
 | `base` | hostname, Management1, mgmt default route, NTP |
 | `underlay` | loopbacks, spine links, underlay + EVPN BGP |
 | `overlay` | VLANs, SVIs, Vxlan1, MAC-VRFs, VRF PROD |

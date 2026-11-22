@@ -1,0 +1,43 @@
+! MOTD banner - reference sample for manual config. Ansible equivalent:
+!   roles/arista_base/templates/motd.j2, pushed with: ansible-playbook site.yml --tags banner
+!
+! "banner motd" is shown AFTER a successful login (SSH and console).
+! "banner login" (optional, at the bottom) is shown BEFORE the password prompt; that is where
+! an authorised-use warning belongs, since it is shown to everyone who connects.
+!
+! Syntax: everything between "banner motd" and a line containing only EOF is the banner,
+! verbatim. Do not put "!" comment lines inside the block - they would become banner text.
+! EOS banners have no hostname variable, so the per-switch lines below are filled in per
+! device (example values are for arista-bl-lf-1).
+!
+banner motd
+================================================================================
+  arista-bl-lf-1  |  Border leaf  |  Multisite VXLAN EVPN fabric (lab)
+  Mgmt: 192.168.122.26 (vrf mgmt)  |  ASN 65103  |  VTEP 10.255.1.13
+--------------------------------------------------------------------------------
+  Logins are authenticated via TACACS+ (192.168.122.63), local as fallback.
+  All commands are logged.
+  Config is managed by Ansible (arista/site.yml) - avoid manual changes;
+  use "configure session" + "commit timer" for any hand edits.
+================================================================================
+EOF
+!
+! Optional pre-login warning:
+!
+! banner login
+! Authorized access only. Activity on this device is monitored and logged.
+! EOF
+!
+! ---------------------------------------------------------------------------------------
+! Per-switch values for the second and third line:
+!
+!   arista-sp-1     Spine        Mgmt 192.168.122.24  ASN 65000  (no VTEP)
+!   arista-sp-2     Spine        Mgmt 192.168.122.25  ASN 65000  (no VTEP)
+!   arista-bl-lf-1  Border leaf  Mgmt 192.168.122.26  ASN 65103  VTEP 10.255.1.13
+!   arista-bl-lf-2  Border leaf  Mgmt 192.168.122.27  ASN 65104  VTEP 10.255.1.14
+!   arista-lf-1     Leaf         Mgmt 192.168.122.28  ASN 65101  VTEP 10.255.1.11
+!   arista-lf-2     Leaf         Mgmt 192.168.122.29  ASN 65102  VTEP 10.255.1.12
+!   (values from inventory/hosts.yml, host_vars/<switch>.yml and spine_asn in group_vars)
+!
+! Check after applying:  show banner motd    (then log in again to see it)
+! Remove:                no banner motd
