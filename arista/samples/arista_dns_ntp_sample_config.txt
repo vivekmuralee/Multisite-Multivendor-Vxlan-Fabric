@@ -1,0 +1,51 @@
+! DNS + NTP client configuration - all Arista switches (identical on every switch, vrf mgmt)
+! Servers: the Kubernetes cluster (kubernetes/README.md, --tags netsvc)
+!   DNS  192.168.122.64  CoreDNS, authoritative for lab.internal + 122.168.192.in-addr.arpa,
+!                        recursive for everything else
+!   NTP  192.168.122.65  chrony, synced to time.cloudflare.com / pool.ntp.org
+!
+! Also pushed by Ansible (arista_base role), the normal way to apply it:
+!   ansible-playbook site.yml --tags ntp,dns
+! (ntp_servers / dns_servers / dns_domain in group_vars/all/vars.yml). The ntp task also
+! removes every "ntp server" line not in ntp_servers. This file is the hand-apply equivalent.
+!
+! "ntp local-interface Management1" WITHOUT "vrf mgmt" pins NTP to the default VRF, and the
+! switch then never contacts a vrf mgmt server (empty "show ntp associations"). Use the vrf form.
+!
+! Check what is there first:
+!   show running-config | include ntp|name-server|domain
+!
+configure session dns-ntp
+!
+! --- DNS (resolver in the mgmt VRF; unqualified names get .lab.internal appended)
+ip name-server vrf mgmt 192.168.122.64
+dns domain lab.internal
+ip domain lookup vrf mgmt source-interface Management1
+!
+! --- NTP
+ntp server vrf mgmt 192.168.122.65 prefer iburst
+! Only if "ntp local-interface Management1" (no vrf) is present:
+!   no ntp local-interface Management1
+!   ntp local-interface vrf mgmt Management1
+! Remove the old public servers (whichever "show running-config | include ntp" lists):
+no ntp server vrf mgmt 216.239.35.0
+no ntp server vrf mgmt 216.40.34.37
+no ntp server vrf mgmt 8.8.8.8
+!
+show session-config diffs
+commit
+!
+! ---------------------------------------------------------------------------------------
+! Verify (NTP needs a few polls, ~1-2 min, before it shows synchronised):
+!   show ntp status                  -> "synchronised to NTP server (192.168.122.65) at stratum N"
+!   show ntp associations            -> 192.168.122.65 marked with *
+!   show ip name-server              -> 192.168.122.64 vrf mgmt
+!   ping vrf mgmt arista-sp-1        -> resolves to 192.168.122.24
+!   ping vrf mgmt cl-lf-1            -> resolves to 192.168.122.34
+!   bash sudo ip netns exec ns-mgmt dig +short -x 192.168.122.38 @192.168.122.64
+!                                    -> cl-bl-lf-1.lab.internal.   (bash runs in the default
+!                                       VRF, hence the ns-mgmt namespace)
+!   (ping 192.168.122.65 gets no reply: the MetalLB service IP only forwards udp/123)
+!
+! Rollback: run the same session with the lines inverted ("no ip name-server vrf mgmt ...",
+! "no dns domain", "no ntp server vrf mgmt 192.168.122.65", re-add the old ntp servers).

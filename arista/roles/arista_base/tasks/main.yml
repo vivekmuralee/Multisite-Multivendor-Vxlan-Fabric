@@ -6,11 +6,41 @@
 
 # Own task + tag so NTP can be pushed on its own:
 #   ansible-playbook site.yml --tags ntp
+# New servers go in first, stale ones are removed after, so the switch is never without one.
 - name: Push NTP servers
   arista.eos.eos_config:
     src: ntp.j2
     save_when: modified
   tags: [ntp]
+
+# eos_config only adds lines: read the configured servers and remove any not in ntp_servers.
+- name: Read configured NTP servers
+  arista.eos.eos_command:
+    commands: ["show running-config | include ^ntp server"]
+  register: ntp_running
+  tags: [ntp]
+
+- name: Remove NTP servers not in ntp_servers
+  arista.eos.eos_config:
+    lines: "{{ stale | map('regex_replace', '^', 'no ') | list }}"
+    save_when: modified
+  vars:
+    stale: >-
+      {{ ntp_running.stdout_lines[0] | map('trim')
+         | select('match', '^ntp server ')
+         | reject('match', '^ntp server (vrf [^ ]+ )?(' ~ (ntp_servers | map('regex_escape') | join('|')) ~ ')( |$)')
+         | map('regex_search', '^ntp server (vrf [^ ]+ )?[^ ]+')
+         | list }}
+  when: stale | length > 0
+  tags: [ntp]
+
+# Resolver in the mgmt VRF (CoreDNS on the Kubernetes cluster, kubernetes/ --tags netsvc):
+#   ansible-playbook site.yml --tags dns
+- name: Push DNS resolver
+  arista.eos.eos_config:
+    src: dns.j2
+    save_when: modified
+  tags: [dns]
 
 # gNMI server + read-only monitoring user for the Kubernetes gnmic collector:
 #   ansible-playbook site.yml --tags telemetry

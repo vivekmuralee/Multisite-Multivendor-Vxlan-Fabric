@@ -62,7 +62,7 @@ The playbook's first play then gives each clone a unique machine-id and SSH host
 ## Run
 ```
 make run VENDOR=kubernetes                      # everything
-make run VENDOR=kubernetes ARGS="--tags prep"   # identity|prep|kubevip|init|join|cni|metallb|kubelet|metrics|disk|cpmetrics|storage|monitoring|mimir|snmp|bgp|gnmi|internet|tacacs
+make run VENDOR=kubernetes ARGS="--tags prep"   # identity|prep|kubevip|init|join|cni|metallb|kubelet|metrics|disk|cpmetrics|storage|monitoring|mimir|snmp|bgp|gnmi|internet|tacacs|netsvc
 ```
 The first play regenerates `/etc/machine-id` and SSH host keys once (the VMs are clones)
 and reboots each node; a marker in `/etc/k8s-node-identity-regenerated` prevents repeats.
@@ -259,6 +259,51 @@ The exporter pings each entry of `internet_targets` in `group_vars/all.yml` (Glo
 each carries a `region` label) every `internet_scrape_interval` through a ServiceMonitor. The dashboard shows
 reachability, RTT, 24h availability, jitter and loss per endpoint. Add destinations by extending the list
 and re-running the tag. Needs the worker VMs to have internet access (NAT on libvirt `default`).
+
+## Fabric DNS and NTP (CoreDNS + chrony)
+
+`--tags netsvc` gives the switches and routers one central resolver and one central time source,
+in namespace `netsvc`. Each is 2 replicas on different nodes behind its own MetalLB IP, with
+`externalTrafficPolicy: Local` (the servers see the real device address, for the allow-lists and logs).
+
+| Service | Address | What |
+|---|---|---|
+| DNS | **192.168.122.64** udp/tcp 53 | CoreDNS (`coredns_image`, the same image kube-dns runs). Authoritative for `lab.internal` and `122.168.192.in-addr.arpa` (A + PTR, real SOA so unknown names get NXDOMAIN); everything else is forwarded to `dns_forwarders` (1.1.1.1, 9.9.9.9) and cached. |
+| NTP | **192.168.122.65** udp 123 | chrony 4.8 on `alpine:3.24.4` (package installed at pod start), synced to `ntp_upstream` (time.cloudflare.com, pool.ntp.org). |
+
+- **Records:** `dns_records` in `group_vars/all.yml` (gateway + all 14 switches; add the PE routers'
+  management IPs there). Cluster nodes, `kube-api`, `grafana`, `prometheus`, `alertmanager`,
+  `tacacs`, `dns` and `ntp` are added automatically. Re-run the tag after editing.
+- **Clients:** only `netsvc_clients` (192.168.122.0/24 and the pod CIDR) get answers from either
+  service, so the resolver is not an open recursor.
+- **NTP safety:** chronyd runs with `-x`, so it serves time but never adjusts the node clock (the nodes
+  keep their own chronyd). It starts as root only to bind :123, then runs as `chrony` with
+  `CAP_NET_BIND_SERVICE` alone. A pod is Ready only once it is synced to an upstream source, so
+  MetalLB never announces an unsynced server. If the internet drops later, chronyd keeps serving
+  its last reference with a growing error estimate. There is no `local stratum` fallback: it could
+  win over a real upstream at pod start, and the pod would then serve its own clock at stratum 10.
+- **Checks** (run by the playbook): A, PTR, NXDOMAIN and a forwarded name through .64; both NTP pods
+  synced upstream; an NTP query to .65 from the master (`chronyd -Q`, measures only). By hand:
+  ```
+  dig @192.168.122.64 arista-lf-1.lab.internal +short
+  dig @192.168.122.64 -x 192.168.122.38 +short
+  kubectl -n netsvc exec deploy/ntp -- chronyc -n tracking
+  kubectl -n netsvc logs -l app=dns          # failed / refused queries only
+  ```
+
+### Pointing the devices at it (not applied by the playbooks)
+
+- Arista: [arista/samples/arista_dns_ntp_sample_config.txt](../arista/samples/arista_dns_ntp_sample_config.txt)
+  (`ntp_servers` in `arista/group_vars/all/vars.yml` already points at .65 for `--tags ntp`).
+- Cumulus: [cumulus/samples/cl_dns_ntp_sample_config.txt](../cumulus/samples/cl_dns_ntp_sample_config.txt).
+- Cisco IOS PEs (use the `vrf <name>` forms if their management interface is in a VRF):
+  ```
+  ip domain lookup
+  ip domain name lab.internal
+  ip name-server 192.168.122.64            ! or: ip name-server vrf Mgmt-intf 192.168.122.64
+  ntp server 192.168.122.65 prefer         ! or: ntp server vrf Mgmt-intf 192.168.122.65 prefer
+  ! verify: show ntp associations / show ntp status / ping arista-sp-1
+  ```
 
 ## TACACS+ AAA server (tac_plus-ng)
 

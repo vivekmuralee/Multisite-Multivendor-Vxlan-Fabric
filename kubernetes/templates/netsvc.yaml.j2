@@ -1,0 +1,257 @@
+# Fabric DNS (CoreDNS) + NTP (chrony) for the switches and routers, rendered by Ansible (tag: netsvc).
+{% set svc_records = [
+  {'name': 'kube-api',     'ip': k8s_api_vip},
+  {'name': 'grafana',      'ip': grafana_lb_ip},
+  {'name': 'prometheus',   'ip': prometheus_lb_ip},
+  {'name': 'alertmanager', 'ip': alertmanager_lb_ip},
+  {'name': 'tacacs',       'ip': tacacs_lb_ip},
+  {'name': 'dns',          'ip': dns_lb_ip},
+  {'name': 'ntp',          'ip': ntp_lb_ip},
+] %}
+{% set node_records = [] %}
+{% for h in groups['k8s'] %}
+{%   set _ = node_records.append({'name': h, 'ip': hostvars[h].ansible_host}) %}
+{% endfor %}
+{% set all_records = dns_records + node_records + svc_records %}
+{% set rev_prefix = (dns_reverse_zone | regex_replace('\\.in-addr\\.arpa\\.?$', '')).split('.') | reverse | join('.') ~ '.' %}
+{% set fwd_zone %}
+$ORIGIN {{ dns_domain }}.
+$TTL 300
+@   IN SOA dns.{{ dns_domain }}. hostmaster.{{ dns_domain }}. ( 1 3600 600 604800 300 )
+@   IN NS  dns.{{ dns_domain }}.
+{% for r in all_records %}
+{{ r.name }} IN A {{ r.ip }}
+{% endfor %}
+{% endset %}
+{% set rev_zone %}
+$ORIGIN {{ dns_reverse_zone }}.
+$TTL 300
+@   IN SOA dns.{{ dns_domain }}. hostmaster.{{ dns_domain }}. ( 1 3600 600 604800 300 )
+@   IN NS  dns.{{ dns_domain }}.
+{% for r in all_records if r.ip.startswith(rev_prefix) %}
+{{ r.ip[rev_prefix | length:] }} IN PTR {{ r.name }}.{{ dns_domain }}.
+{% endfor %}
+{% endset %}
+{% set corefile %}
+# Local zone + reverse zone: authoritative (SOA, so unknown names get NXDOMAIN), never forwarded.
+{{ dns_domain }}:53 {{ dns_reverse_zone }}:53 {
+    errors
+    log . {
+        class denial error
+    }
+    acl {
+        allow net {{ netsvc_clients | join(' ') }}
+        block
+    }
+    file /etc/coredns/db.forward {{ dns_domain }}
+    file /etc/coredns/db.reverse {{ dns_reverse_zone }}
+    prometheus :9153
+}
+
+# Everything else: recursive via the upstream resolvers, cached.
+.:53 {
+    errors
+    health {
+        lameduck 5s
+    }
+    ready
+    acl {
+        allow net {{ netsvc_clients | join(' ') }}
+        block
+    }
+    forward . {{ dns_forwarders | join(' ') }}
+    cache 300
+    loop
+    prometheus :9153
+}
+{% endset %}
+{% set chrony_conf %}
+# Upstream time sources (the pods reach the internet through node NAT).
+{% for s in ntp_upstream %}
+{{ s.type }} {{ s.host }} iburst{% if s.type == 'pool' %} maxsources {{ s.maxsources | default(3) }}{% endif %}
+
+{% endfor %}
+
+# Serve the fabric.
+{% for c in netsvc_clients %}
+allow {{ c }}
+{% endfor %}
+
+# Started with -x: the node clock is left to the node's own chronyd.
+driftfile /var/lib/chrony/drift
+pidfile /run/chronyd.pid
+{% endset %}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ netsvc_namespace }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dns-config
+  namespace: {{ netsvc_namespace }}
+data:
+  Corefile: |
+{{ corefile | indent(4, true) }}
+  db.forward: |
+{{ fwd_zone | indent(4, true) }}
+  db.reverse: |
+{{ rev_zone | indent(4, true) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dns
+  namespace: {{ netsvc_namespace }}
+  labels: { app: dns }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: dns }
+  template:
+    metadata:
+      labels: { app: dns }
+      annotations:
+        checksum/config: "{{ (corefile ~ fwd_zone ~ rev_zone ~ coredns_image) | hash('sha256') }}"
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector: { matchLabels: { app: dns } }
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: coredns
+          image: {{ coredns_image }}
+          args: ["-conf", "/etc/coredns/Corefile"]
+          ports:
+            - { name: dns,     containerPort: 53,   protocol: UDP }
+            - { name: dns-tcp, containerPort: 53,   protocol: TCP }
+            - { name: metrics, containerPort: 9153, protocol: TCP }
+          # Same as the cluster's own CoreDNS (kube-system).
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL], add: [NET_BIND_SERVICE] }
+          readinessProbe:
+            httpGet: { path: /ready, port: 8181 }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          volumeMounts:
+            - { name: config, mountPath: /etc/coredns, readOnly: true }
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { memory: 128Mi }
+      volumes:
+        - name: config
+          configMap: { name: dns-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dns
+  namespace: {{ netsvc_namespace }}
+  annotations:
+    metallb.io/loadBalancerIPs: {{ dns_lb_ip }}
+spec:
+  type: LoadBalancer
+  # Keep the device source IP for the ACL and the logs.
+  externalTrafficPolicy: Local
+  selector: { app: dns }
+  ports:
+    - { name: dns,     port: 53, targetPort: dns,     protocol: UDP }
+    - { name: dns-tcp, port: 53, targetPort: dns-tcp, protocol: TCP }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ntp-config
+  namespace: {{ netsvc_namespace }}
+data:
+  chrony.conf: |
+{{ chrony_conf | indent(4, true) }}
+  start.sh: |
+    #!/bin/sh
+    # chronyd starts as root only to bind :123, then drops to user chrony keeping
+    # CAP_NET_BIND_SERVICE alone. No DAC_OVERRIDE/FOWNER: create the dir with its mode, then chown.
+    set -eu
+    apk add --no-cache chrony >/dev/null
+    chronyd --version
+    mkdir -m 0750 /run/chrony
+    chown chrony:chrony /run/chrony
+    exec chronyd -d -x -u chrony -f /config/chrony.conf
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ntp
+  namespace: {{ netsvc_namespace }}
+  labels: { app: ntp }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: ntp }
+  template:
+    metadata:
+      labels: { app: ntp }
+      annotations:
+        checksum/config: "{{ (chrony_conf ~ ntp_image) | hash('sha256') }}"
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector: { matchLabels: { app: ntp } }
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: chrony
+          image: {{ ntp_image }}
+          command: ["/bin/sh", "/config/start.sh"]
+          ports:
+            - { name: ntp, containerPort: 123, protocol: UDP }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL], add: [NET_BIND_SERVICE, SETUID, SETGID, CHOWN] }
+          # Ready only once synced to an upstream source, so MetalLB never announces an unsynced pod.
+          # If the internet drops later, chronyd keeps serving its last reference (growing dispersion).
+          readinessProbe:
+            exec:
+              command: ["/bin/sh", "-c", "chronyc -n tracking | grep -Eq '^Leap status +: Normal'"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["chronyc", "-n", "tracking"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          volumeMounts:
+            - { name: config, mountPath: /config, readOnly: true }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
+      volumes:
+        - name: config
+          configMap: { name: ntp-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ntp
+  namespace: {{ netsvc_namespace }}
+  annotations:
+    metallb.io/loadBalancerIPs: {{ ntp_lb_ip }}
+spec:
+  type: LoadBalancer
+  # Keep the device source IP for chrony's allow list. With Local, MetalLB announces the IP from
+  # a node that runs a ready pod, so a client keeps talking to the same chronyd until failover.
+  externalTrafficPolicy: Local
+  selector: { app: ntp }
+  ports:
+    - { name: ntp, port: 123, targetPort: ntp, protocol: UDP }
