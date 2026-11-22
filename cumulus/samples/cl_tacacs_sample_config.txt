@@ -1,0 +1,128 @@
+===============================================================================
+Hand-apply configuration guide - TACACS+ client (all Cumulus switches)
+===============================================================================
+Same commands on every switch (cl-sp-1/2, cl-lf-1..4, cl-bl-lf-1/2) except the
+source IP. Server: tac_plus-ng on the Kubernetes cluster, 192.168.122.63:49
+(kubernetes/README.md, --tags tacacs), reached through the management VRF
+(eth0, vrf mgmt). Syntax checked against NVUE on Cumulus Linux 5.4.0
+("nv set system aaa tacacs -h"); NOT yet applied to any switch.
+
+NOT applied by Ansible. Before pasting:
+  * Replace <TACACS_KEY> with the contents of kubernetes/artifacts/tacacs-key
+    (git-ignored).
+  * Keep a second ssh session open and use the rollback timer (see Apply).
+
+Method order: TACACS first, local as the fallback ("authentication-order").
+The local accounts that automation depends on are EXCLUDED from TACACS, so they
+keep working whether the server is up, down or rejecting them:
+  cumulus   Ansible (remote_user in cumulus/ansible.cfg), sudo
+  monitor   NVUE REST API / BGP monitoring (nvue_api_user)
+This differs from the Arista setup, where admin/monitor are mirrored on the
+server because EOS has no exclude list. No server change is needed for Cumulus.
+
+TACACS-only users (same server users as on the Arista switches):
+  netadmin, vivek  priv-lvl 15  admin
+  netops           priv-lvl 1   read-only
+tac_plus-ng offers password login via PAP (password pap = login), so the
+authentication mode below is pap.
+
+-------------------------------------------------------------------------------
+Before you start
+-------------------------------------------------------------------------------
+# Anything already staged but not applied? MUST print nothing - otherwise
+# "nv config apply" below applies that half-finished work too.
+nv config diff
+
+# Server reachable from the mgmt VRF? Should print "open". (nc is not installed
+# on Cumulus, so use bash's /dev/tcp.)
+sudo ip vrf exec mgmt timeout 3 bash -c '</dev/tcp/192.168.122.63/49' && echo open || echo "closed/filtered"
+
+# tacplus-client package installed? NVUE refuses to apply ("Install the
+# tacplus-client package before enabling TACACS+ client use") without it.
+# If the dpkg line prints nothing, install it (mgmt VRF has the route out):
+dpkg -l tacplus-client
+sudo ip vrf exec mgmt apt-get update
+sudo ip vrf exec mgmt apt-get install -y tacplus-client
+# No repo access: fetch the .deb elsewhere, scp it over, "sudo dpkg -i <file>.deb".
+# If apt cannot find it: "apt-cache search tacplus" and install what it lists.
+
+# Current order is "1 local" only:
+nv show system aaa authentication-order
+
+-------------------------------------------------------------------------------
+Step 1 - TACACS+ server (replace <TACACS_KEY>)
+-------------------------------------------------------------------------------
+nv set system aaa tacacs enable on
+nv set system aaa tacacs vrf mgmt
+nv set system aaa tacacs timeout 5
+nv set system aaa tacacs server 1 host 192.168.122.63
+nv set system aaa tacacs server 1 port 49
+nv set system aaa tacacs server 1 secret <TACACS_KEY>
+
+# Source address of the requests: the switch's own mgmt IP. The server only
+# accepts clients in 192.168.122.0/24 (tacacs_clients), so this must be eth0's.
+#   cl-sp-1 .32   cl-sp-2 .33   cl-lf-1 .34   cl-lf-2 .35
+#   cl-lf-3 .36   cl-lf-4 .37   cl-bl-lf-1 .38   cl-bl-lf-2 .39
+nv set system aaa tacacs source-ip 192.168.122.34      # <- this switch
+
+-------------------------------------------------------------------------------
+Step 2 - Authentication, accounting, excluded accounts
+-------------------------------------------------------------------------------
+nv set system aaa tacacs authentication mode pap
+nv set system aaa tacacs accounting enable on
+nv set system aaa tacacs accounting send-records all
+
+# Keep the automation accounts local-only (do NOT skip: without these, Ansible
+# and the REST API monitor are checked by the server, which has no "cumulus"
+# user, and are rejected).
+nv set system aaa tacacs exclude-user cumulus
+nv set system aaa tacacs exclude-user monitor
+
+# TACACS first, local second.
+nv set system aaa authentication-order 1 tacacs
+nv set system aaa authentication-order 2 local
+
+-------------------------------------------------------------------------------
+Apply (do this on ONE switch first, e.g. cl-lf-1)
+-------------------------------------------------------------------------------
+# Should list only the tacacs / authentication-order changes above:
+nv config diff
+
+# Rolls back by itself unless confirmed within 5 minutes. Keep this ssh session
+# open, and test from a SECOND one before the timer runs out.
+nv config apply --confirm 5m -y
+
+# From a second ssh session / the Ansible host:
+#   ssh netadmin@192.168.122.34    -> logs in, "sudo -l" works (priv-lvl 15)
+#   ssh netops@192.168.122.34      -> logs in, no sudo (priv-lvl 1)
+#   ssh cumulus@192.168.122.34     -> still works (excluded, local)
+#   ansible cl-lf-1 -m ping        -> still works
+#   curl -k -u monitor:<pw> https://192.168.122.34:8765/nvue_v1/system  (REST API)
+# Then make it permanent:
+nv config confirm
+# or let the timer expire to roll back.
+
+-------------------------------------------------------------------------------
+Verify
+-------------------------------------------------------------------------------
+nv show system aaa authentication-order
+nv show system aaa tacacs
+# Server side (shows the switch source IP and each login):
+#   kubectl -n aaa logs deploy/tacacs -c tac-plus-ng
+# Fallback test: kubectl -n aaa scale deploy/tacacs --replicas=0, wait ~10 s,
+#   ssh cumulus@<switch> still works; netadmin/netops are refused (no local
+#   account). Scale back to 1 afterwards.
+
+NOTE - to confirm on the first switch (not verifiable until TACACS is on):
+the user mapping. Cumulus maps TACACS users to local "tacacs0".."tacacs15"
+accounts by priv-lvl; check "id" / "sudo -l" for netadmin vs netops after login
+and adjust the server's priv-lvl or "nv set system aaa tacacs authentication
+per-user-homedir" if the result is not as listed above.
+
+-------------------------------------------------------------------------------
+Rollback
+-------------------------------------------------------------------------------
+nv unset system aaa tacacs
+nv unset system aaa authentication-order
+nv set system aaa authentication-order 1 local
+nv config apply -y
