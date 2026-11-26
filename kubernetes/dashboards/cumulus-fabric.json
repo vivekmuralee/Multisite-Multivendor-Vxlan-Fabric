@@ -43,6 +43,53 @@
         },
         "refresh": 2,
         "sort": 1
+      },
+      {
+        "name": "state",
+        "label": "Port state",
+        "type": "custom",
+        "query": "All : >0,UP : ==1,DOWN : ==2",
+        "options": [
+          {
+            "text": "All",
+            "value": ">0",
+            "selected": true
+          },
+          {
+            "text": "UP",
+            "value": "==1",
+            "selected": false
+          },
+          {
+            "text": "DOWN",
+            "value": "==2",
+            "selected": false
+          }
+        ],
+        "current": {
+          "text": "All",
+          "value": ">0",
+          "selected": true
+        },
+        "multi": false,
+        "includeAll": false
+      },
+      {
+        "name": "port",
+        "label": "Port (regex)",
+        "type": "textbox",
+        "query": ".*",
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "options": [
+          {
+            "selected": true,
+            "text": ".*",
+            "value": ".*"
+          }
+        ]
       }
     ]
   },
@@ -1894,14 +1941,14 @@
         "w": 24,
         "h": 11
       },
-      "description": "Operational state of every swp port. DOWN on a cabled port is a fault; DOWN on a spare port is normal.",
+      "description": "Operational state of every swp port. DOWN on a cabled port is a fault; DOWN on a spare port is normal. Use the Port state / Port filter variables above, or the per-column filter (click a header's filter icon) and header-click sorting.",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "ifOperStatus{target=~\"$switch\",ifName=~\"swp[0-9]+\"}",
+          "expr": "ifOperStatus{target=~\"$switch\",ifName=~\"swp[0-9]+\",ifName=~\"$port\"} $state",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -1959,7 +2006,8 @@
             "align": "left",
             "cellOptions": {
               "type": "color-text"
-            }
+            },
+            "filterable": true
           },
           "mappings": [
             {
@@ -1999,7 +2047,14 @@
       },
       "options": {
         "showHeader": true,
-        "cellHeight": "sm"
+        "cellHeight": "sm",
+        "footer": {
+          "show": true,
+          "reducer": [
+            "count"
+          ],
+          "fields": ""
+        }
       }
     },
     {

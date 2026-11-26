@@ -1,0 +1,112 @@
+---
+- name: Check whether tacplus-client is installed
+  ansible.builtin.command: dpkg -s tacplus-client
+  register: cumulus_tacacs_pkg
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# NVUE refuses to apply TACACS config without this package.
+- name: Stop if the package is missing and the install was not approved
+  ansible.builtin.fail:
+    msg: >-
+      tacplus-client is not installed on {{ inventory_hostname }} and the
+      install was not approved (answer y at the prompt or pass
+      -e tacacs_install_confirm=y). Nothing was changed.
+  when: cumulus_tacacs_pkg.rc != 0 and (tacacs_install_confirm | lower) not in ['y', 'yes']
+
+- name: Install tacplus-client (through the mgmt VRF)
+  ansible.builtin.command: ip vrf exec mgmt apt-get install -y tacplus-client
+  when: cumulus_tacacs_pkg.rc != 0
+  changed_when: true
+
+- name: Check the TACACS+ server is reachable from the mgmt VRF
+  ansible.builtin.command: >
+    ip vrf exec mgmt timeout 3 bash -c
+    '</dev/tcp/{{ tacacs_server }}/{{ tacacs_port }}'
+  changed_when: false
+  check_mode: false
+
+- name: Refuse to continue if other NVUE changes are already staged
+  ansible.builtin.command: nv config diff
+  register: cumulus_tacacs_prediff
+  changed_when: false
+  check_mode: false
+  failed_when: cumulus_tacacs_prediff.stdout | trim | length > 0
+
+- name: Stage TACACS+ configuration
+  ansible.builtin.template:
+    src: nv_tacacs.sh.j2
+    dest: /tmp/ansible-nvue-tacacs.sh
+    mode: "0700"
+  no_log: true
+
+- name: Run the staging script
+  ansible.builtin.command: bash /tmp/ansible-nvue-tacacs.sh
+  changed_when: true
+  when: not ansible_check_mode
+
+- name: Remove the staging script (it contains the key)
+  ansible.builtin.file:
+    path: /tmp/ansible-nvue-tacacs.sh
+    state: absent
+
+- name: Show what will change
+  ansible.builtin.command: nv config diff
+  register: cumulus_tacacs_diff
+  changed_when: false
+  check_mode: false
+
+- name: Apply with an automatic rollback timer
+  ansible.builtin.command: nv config apply --confirm {{ tacacs_confirm }} -y
+  when: cumulus_tacacs_diff.stdout | trim | length > 0 and not ansible_check_mode
+  register: cumulus_tacacs_apply
+  changed_when: true
+
+# Ansible logs in as the excluded local user "cumulus", so reaching this task
+# proves the switch is still manageable. If it fails, the timer rolls back.
+- name: Verify TACACS+ is active
+  ansible.builtin.command: nv show system aaa tacacs
+  register: cumulus_tacacs_show
+  changed_when: false
+  check_mode: false
+  when: cumulus_tacacs_apply is changed
+  # "applied" column of the enable row must be on, and a server must be listed
+  # (the output shows "[server] 1", not the IP).
+  failed_when: >-
+    cumulus_tacacs_show.stdout is not regex('(?m)^enable\s+on\s')
+    or '[server]' not in cumulus_tacacs_show.stdout
+
+# Test window: the rollback timer is still running here. Log in from a SECOND
+# session as netadmin / vivek / netops, then come back and press Enter.
+# Ctrl-C then "a" aborts the run and the switch rolls back by itself.
+# Skip the pause with -e tacacs_pause_for_test=false.
+- name: Pause so the TACACS+ logins can be tested
+  ansible.builtin.pause:
+    prompt: |
+
+      {{ inventory_hostname }} ({{ ansible_host }}): TACACS+ applied, rollback timer {{ tacacs_confirm }} running.
+      Test in another terminal:
+        ssh netadmin@{{ ansible_host }}   (sudo -l works)
+        ssh netops@{{ ansible_host }}     (no sudo)
+        ssh cumulus@{{ ansible_host }}    (still works)
+      Press Enter to CONFIRM, or Ctrl-C then a to abort and roll back
+  when: cumulus_tacacs_apply is changed and tacacs_pause_for_test | bool
+
+- name: Confirm the change (cancels the rollback)
+  ansible.builtin.command: nv config apply --confirm-yes
+  when: cumulus_tacacs_apply is changed
+  changed_when: true
+
+# Cumulus maps each TACACS+ priv-level to a real local account (tacacs0..tacacs15,
+# created with the tacplus-client package). A user's session gets the groups of
+# THAT account, not of the name typed at login (vivek -> tacacs15), so the NVUE
+# groups must be added to the real account. Without nvshow/nvset/nvapply,
+# "nv show/set/apply" says "You do not have permission to execute that command".
+# Only the two levels in use are touched (vars: tacacs_nvue_groups).
+- name: Give the TACACS+ local accounts their NVUE groups
+  ansible.builtin.command: usermod -aG {{ item.value | join(',') }} {{ item.key }}
+  loop: "{{ tacacs_nvue_groups | dict2items }}"
+  when: not ansible_check_mode
+  changed_when: true
+  tags: [nvue_groups]

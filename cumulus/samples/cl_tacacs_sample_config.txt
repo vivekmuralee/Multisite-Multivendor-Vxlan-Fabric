@@ -7,7 +7,10 @@ source IP. Server: tac_plus-ng on the Kubernetes cluster, 192.168.122.63:49
 (eth0, vrf mgmt). Syntax checked against NVUE on Cumulus Linux 5.4.0
 ("nv set system aaa tacacs -h"); NOT yet applied to any switch.
 
-NOT applied by Ansible. Before pasting:
+Two ways to apply: by hand (this file) or with the Ansible playbook (see
+"Ansible alternative" at the end). Do ONE of them per switch, not both.
+
+Before pasting by hand:
   * Replace <TACACS_KEY> with the contents of kubernetes/artifacts/tacacs-key
     (git-ignored).
   * Keep a second ssh session open and use the rollback timer (see Apply).
@@ -37,11 +40,9 @@ nv config diff
 # on Cumulus, so use bash's /dev/tcp.)
 sudo ip vrf exec mgmt timeout 3 bash -c '</dev/tcp/192.168.122.63/49' && echo open || echo "closed/filtered"
 
-# tacplus-client package installed? NVUE refuses to apply ("Install the
-# tacplus-client package before enabling TACACS+ client use") without it.
-# If the dpkg line prints nothing, install it (mgmt VRF has the route out):
-dpkg -l tacplus-client
-sudo ip vrf exec mgmt apt-get update
+# NVUE refuses to apply ("Install the tacplus-client package before enabling
+# TACACS+ client use") without the tacplus-client package. Install it (the mgmt
+# VRF has the route out):
 sudo ip vrf exec mgmt apt-get install -y tacplus-client
 # No repo access: fetch the .deb elsewhere, scp it over, "sudo dpkg -i <file>.deb".
 # If apt cannot find it: "apt-cache search tacplus" and install what it lists.
@@ -99,7 +100,7 @@ nv config apply --confirm 5m -y
 #   ansible cl-lf-1 -m ping        -> still works
 #   curl -k -u monitor:<pw> https://192.168.122.34:8765/nvue_v1/system  (REST API)
 # Then make it permanent:
-nv config confirm
+nv config apply --confirm-yes
 # or let the timer expire to roll back.
 
 -------------------------------------------------------------------------------
@@ -113,11 +114,54 @@ nv show system aaa tacacs
 #   ssh cumulus@<switch> still works; netadmin/netops are refused (no local
 #   account). Scale back to 1 afterwards.
 
+VERIFIED on cl-bl-lf-1: a priv-lvl 15 user (vivek) gets full sudo, no sudoers
+change needed. "sudo -l" shows "(ALL : ALL) ALL" (password required) plus the
+stock "(root) NOPASSWD: /usr/bin/vrf task set default [0-9]*" rule. netops
+(priv-lvl 1) still to be checked: "sudo -l" should refuse.
+
 NOTE - to confirm on the first switch (not verifiable until TACACS is on):
 the user mapping. Cumulus maps TACACS users to local "tacacs0".."tacacs15"
 accounts by priv-lvl; check "id" / "sudo -l" for netadmin vs netops after login
 and adjust the server's priv-lvl or "nv set system aaa tacacs authentication
 per-user-homedir" if the result is not as listed above.
+
+-------------------------------------------------------------------------------
+Ansible alternative (cumulus/tacacs.yml, role cumulus_tacacs)
+-------------------------------------------------------------------------------
+Does the same as Steps 1-2 + Apply, but it is NOT part of site.yml: run it on
+purpose. Run from the cumulus/ directory on the Ansible host.
+Needs kubernetes/artifacts/tacacs-key (git-ignored), or -e tacacs_key=<key>.
+Settings (server, port, timeout, excluded users) are in group_vars/all/vars.yml.
+
+# 1. Dry run on the first switch - changes nothing:
+ansible-playbook tacacs.yml --limit cl-lf-1 --check
+
+# 2. Real run on the first switch. Per switch it: installs tacplus-client
+#    (apt-get install in vrf mgmt) if missing, checks TCP/49, refuses
+#    to go on if other NVUE changes are staged, stages the config, runs
+#    "nv config apply --confirm 5m", checks TACACS is active, then pauses for
+#    your login test and runs "nv config apply --confirm-yes". If a task fails first, the switch rolls back itself.
+ansible-playbook tacacs.yml --limit cl-lf-1
+
+# 3. Test logins (netadmin, vivek, netops) as in "Apply" above, then the rest
+#    of the switches, one at a time:
+ansible-playbook tacacs.yml
+
+# Test window: after the apply the playbook PAUSES (rollback timer 10m, see
+# tacacs_confirm in group_vars/all/vars.yml). Test the logins from a second
+# session, then press Enter to run "nv config apply --confirm-yes". Ctrl-C then "a" aborts
+# and the switch rolls back by itself. -e tacacs_pause_for_test=false skips the
+# pause and confirms straight away.
+# Ansible logs in as "cumulus", which is excluded from TACACS, so it keeps working.
+
+# NVUE groups: Cumulus maps each priv-level to a real local account (netadmin and
+# vivek -> tacacs15, netops -> tacacs1) and a session gets the groups of THAT
+# account, not of the login name. Without nvshow/nvset/nvapply, "nv show" says
+# "You do not have permission". By hand, per switch (then log out and in):
+#   sudo usermod -aG nvshow,nvset,nvapply tacacs15
+#   sudo usermod -aG nvshow tacacs1
+# The playbook does this too; to run only that part:
+#   ansible-playbook tacacs.yml --limit <switch> -e tacacs_install_confirm=n --tags nvue_groups
 
 -------------------------------------------------------------------------------
 Rollback

@@ -1,0 +1,26 @@
+---
+# TACACS+ client on every Cumulus switch (automates samples/cl_tacacs_sample_config.txt).
+# Deliberately NOT part of site.yml: a bad AAA change can lock people out, so it
+# is run on purpose, one switch first.
+#
+# Usage:
+#   ansible-playbook tacacs.yml --limit cl-lf-1 --check   # nothing is changed
+#   ansible-playbook tacacs.yml --limit cl-lf-1           # first switch
+#   ansible-playbook tacacs.yml                           # rest, one at a time
+#
+# Needs kubernetes/artifacts/tacacs-key (git-ignored) or -e tacacs_key=...
+# The "cumulus" and "monitor" accounts are excluded from TACACS, so Ansible and
+# the REST API keep working even if the server is down.
+
+- name: Configure TACACS+ client (all Cumulus switches)
+  hosts: fabric
+  gather_facts: false
+  serial: 1
+  # Asked once at the start. Skip the question with -e tacacs_install_confirm=y
+  vars_prompt:
+    - name: tacacs_install_confirm
+      prompt: "Install tacplus-client on switches where it is missing? (y/n)"
+      private: false
+      default: "n"
+  roles:
+    - cumulus_tacacs

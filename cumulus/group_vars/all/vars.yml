@@ -71,3 +71,20 @@ dns_server: 192.168.122.64
 # roles/cumulus_underlay/templates/nv_underlay.sh.j2.
 banner_site_name: Multisite VXLAN EVPN fabric (lab)
 banner_login: "Authorized access only. Activity on this device is monitored and logged."
+
+# TACACS+ (tac_plus-ng on the Kubernetes cluster, tag "tacacs"). Pushed by tacacs.yml.
+# The key lives in a git-ignored file; override with -e tacacs_key=... if needed.
+tacacs_server: 192.168.122.63
+tacacs_port: 49
+tacacs_timeout: 5
+tacacs_key: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../kubernetes/artifacts/tacacs-key') | trim }}"
+tacacs_confirm: 10m
+# Stop before confirming so logins can be tested; false = confirm straight away.
+tacacs_pause_for_test: true
+# Local-only accounts (Ansible, REST API) - never sent to the TACACS+ server.
+tacacs_exclude_users: [cumulus, monitor]
+# NVUE groups for the local accounts Cumulus maps TACACS+ priv-levels to
+# (tacacs15 = priv-lvl 15 netadmin/vivek, tacacs1 = priv-lvl 1 netops).
+tacacs_nvue_groups:
+  tacacs15: [nvshow, nvset, nvapply]
+  tacacs1: [nvshow]
